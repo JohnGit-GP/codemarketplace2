@@ -1,29 +1,21 @@
-{{- if .Values.ingress.enabled }}
-apiVersion: networking.istio.io/v1beta1
-kind: Gateway
+{{- if .Values.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
 metadata:
-  name: {{ include "code-marketplace.fullname" . }}-gateway
+  name: {{ include "code-marketplace.fullname" . }}
   labels:
     {{- include "code-marketplace.labels" . | nindent 4 }}
 spec:
-  selector:
-    istio: {{ .Values.istio.ingressSelector }}
-  servers:
-    - port:
-        number: 443
-        name: https
-        protocol: HTTPS
-      tls:
-        mode: SIMPLE
-        credentialName: {{ .Values.istio.tlsSecretName }}
-      hosts:
-        - {{ .Values.ingress.host }}
-    - port:
-        number: 80
-        name: http
-        protocol: HTTP
-      hosts:
-        - {{ .Values.ingress.host }}
-      tls:
-        httpsRedirect: true
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "code-marketplace.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
 {{- end }}
