@@ -1,0 +1,20 @@
+{
+  "name": "code-marketplace",
+  "namespace": "code-marketplace",
+  "chart": {
+    "source": "local",
+    "path": "./charts/code-marketplace",
+    "version": "0.1.0"
+  },
+  "valuesTemplate": "values.yaml",
+  "istio": {
+    "revision": "asm-1-27"
+  },
+  "secrets": [
+    {
+      "name": "code-marketplace-artifactory",
+      "keys": ["token"],
+      "source": "env:ARTIFACTORY_TOKEN"
+    }
+  ]
+}

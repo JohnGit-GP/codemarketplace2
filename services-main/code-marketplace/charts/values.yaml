@@ -1,0 +1,35 @@
+# Default values for the code-marketplace chart.
+# Overridden by services/code-marketplace/values.yaml at deploy time.
+
+image:
+  repository: ghcr.io/coder/code-marketplace
+  tag: v2.5.0
+  pullPolicy: IfNotPresent
+
+replicas: 1
+
+artifactory:
+  url: ""              # http://artifactory.artifactory.svc.cluster.local
+  repo: ""             # vscode-extensions
+  tokenSecretName: ""  # secret with key `token`
+
+extensionsURL: ""      # public URL clients use; sets the gallery base URL
+
+service:
+  port: 3001
+
+ingress:
+  enabled: false
+  className: istio
+  host: ""
+
+istio:
+  revision: asm-1-27
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

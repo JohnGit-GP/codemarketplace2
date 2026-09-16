@@ -1,0 +1,3 @@
+# Container images required by code-marketplace.
+# Mirrored to Gov ACR by shared/scripts/mirror-images.sh.
+ghcr.io/coder/code-marketplace:v2.5.0

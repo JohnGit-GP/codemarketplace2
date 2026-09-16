@@ -1,0 +1,30 @@
+# Helm values template for code-marketplace.
+# Rendered at deploy time via envsubst before being passed to helm.
+# Required env vars: ACR_NAME, BASE_DOMAIN.
+
+image:
+  repository: ${ACR_NAME}.azurecr.us/coder/code-marketplace
+  tag: v2.5.0
+
+artifactory:
+  url: http://artifactory.artifactory.svc.cluster.local
+  repo: vscode-extensions
+  tokenSecretName: code-marketplace-artifactory
+
+extensionsURL: https://vscode-marketplace.${BASE_DOMAIN}
+
+ingress:
+  enabled: true
+  host: vscode-marketplace.${BASE_DOMAIN}
+  className: istio
+
+istio:
+  revision: asm-1-27
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

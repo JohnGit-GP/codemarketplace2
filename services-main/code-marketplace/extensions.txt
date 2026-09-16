@@ -1,0 +1,12 @@
+# Curated approved VS Code extensions for Gov Cloud.
+# Format: <publisher>.<name>@<version>
+# Used as the source-of-truth list when pulling .vsix on the connected side.
+# Pulled with `vsce` or `code` CLI on connected side, transferred, then uploaded
+# to Artifactory by scripts/seed-extensions.sh.
+
+ms-python.python@2024.22.0
+golang.go@0.42.0
+hashicorp.terraform@2.32.0
+ms-azuretools.vscode-bicep@0.30.0
+redhat.vscode-yaml@1.15.0
+ms-vscode.azure-account@0.12.0
