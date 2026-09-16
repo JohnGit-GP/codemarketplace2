@@ -3,4 +3,4 @@ name: code-marketplace
 description: Coder code-marketplace gateway for VS Code extensions, Artifactory-backed
 type: application
 version: 0.1.0
-appVersion: "2.5.0"
+appVersion: "2.4.2"
