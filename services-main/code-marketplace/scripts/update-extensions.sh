@@ -1,46 +1,34 @@
 #!/usr/bin/env bash
-# Deploy code-marketplace to AKS.
-# Required env: ACR_NAME, BASE_DOMAIN, ARTIFACTORY_TOKEN
+# Ingest a single .vsix into Artifactory via code-marketplace's `add` command.
+# A raw PUT is NOT enough — the gallery only indexes extensions added this way
+# (add extracts the .vsix and writes the publisher/name/version layout + metadata).
+#
+# Runs `add` inside the deployed pod, reusing its binary, ARTIFACTORY_TOKEN,
+# and the exact --artifactory URL the server was started with.
+#
+# Optional env: NAMESPACE (default code-marketplace), REPO (default vscode-extensions)
 set -euo pipefail
-
-SVC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
-cd "$SVC_DIR"
-
-# shellcheck source=../service.conf
-source ./service.conf
-
-: "${ACR_NAME:?Set ACR_NAME (e.g. govacrcompany)}"
-: "${BASE_DOMAIN:?Set BASE_DOMAIN (e.g. apps.example.gov)}"
-: "${ARTIFACTORY_TOKEN:?Set ARTIFACTORY_TOKEN}"
-
-ISTIO_REV="$(jq -r '.istio.revision' service.json)"
-SECRET_NAME="$(jq -r '.secrets[0].name' service.json)"
-
-echo "── Namespace ──"
-kubectl get ns "$NAMESPACE" >/dev/null 2>&1 \
-  || kubectl create namespace "$NAMESPACE"
-kubectl label namespace "$NAMESPACE" "istio.io/rev=$ISTIO_REV" --overwrite
-
-echo "── Secret ──"
-kubectl -n "$NAMESPACE" create secret generic "$SECRET_NAME" \
-  --from-literal=token="$ARTIFACTORY_TOKEN" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-echo "── Render values.yaml ──"
-# Pull in the exported vars (ACR_NAME, BASE_DOMAIN, ARTIFACTORY_SERVICENAME, etc.)
-[[ -f ./.env ]] && source ./.env
-RENDERED="$(mktemp -t values-rendered.XXXXXX.yaml)"
-trap 'rm -f "$RENDERED"' EXIT
-export ACR_NAME BASE_DOMAIN ARTIFACTORY_SERVICENAME HOST_PREFIX
-envsubst '${ACR_NAME} ${BASE_DOMAIN} ${ARTIFACTORY_SERVICENAME} ${HOST_PREFIX}' < values.yaml > "$RENDERED"
-
-echo "── Helm upgrade ──"
-helm upgrade --install "$RELEASE_NAME" "$HELM_CHART_PATH" \
-  -n "$NAMESPACE" \
-  -f "$RENDERED" \
-  --wait --timeout 5m
-
-echo "── Rollout ──"
-kubectl -n "$NAMESPACE" rollout status deployment/"$RELEASE_NAME" --timeout=5m
-
-echo "✓ $SERVICE_NAME deployed to namespace=$NAMESPACE"
+ 
+VSIX="${1:?Usage: $0 <path-to-vsix>}"
+[[ -f "$VSIX" ]] || { echo "Not a file: $VSIX" >&2; exit 1; }
+ 
+NAMESPACE="${NAMESPACE:-code-marketplace}"
+REPO="${REPO:-vscode-extensions}"
+BASENAME="$(basename "$VSIX")"
+ 
+POD=$(kubectl -n "$NAMESPACE" get pod -l app=code-marketplace \
+  -o jsonpath='{.items[0].metadata.name}')
+[[ -n "$POD" ]] || { echo "No code-marketplace pod in ns/$NAMESPACE" >&2; exit 1; }
+ 
+# Reuse the exact --artifactory URL the server is running with
+ART_URL=$(kubectl -n "$NAMESPACE" get deploy code-marketplace \
+  -o jsonpath='{range .spec.template.spec.containers[0].args[*]}{@}{"\n"}{end}' \
+  | sed -n 's/^--artifactory=//p')
+[[ -n "$ART_URL" ]] || { echo "Could not read --artifactory from deployment" >&2; exit 1; }
+ 
+kubectl -n "$NAMESPACE" cp "$VSIX" "$POD":/tmp/"$BASENAME"
+kubectl -n "$NAMESPACE" exec "$POD" -- \
+  code-marketplace add /tmp/"$BASENAME" --artifactory "$ART_URL" --repo "$REPO"
+kubectl -n "$NAMESPACE" exec "$POD" -- rm -f /tmp/"$BASENAME"
+ 
+echo "✓ Added $BASENAME via code-marketplace (repo=$REPO)"
