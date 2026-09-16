@@ -1,37 +1,46 @@
 #!/usr/bin/env bash
-# Probe code-marketplace deployment health and gallery API.
-# Optional env: NAMESPACE (default: code-marketplace)
+# Deploy code-marketplace to AKS.
+# Required env: ACR_NAME, BASE_DOMAIN, ARTIFACTORY_TOKEN
 set -euo pipefail
 
-NAMESPACE="${NAMESPACE:-code-marketplace}"
+SVC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
+cd "$SVC_DIR"
 
-echo "── Pods ──"
-kubectl -n "$NAMESPACE" get pods -o wide
+# shellcheck source=../service.conf
+source ./service.conf
 
-echo ""
-echo "── Service ──"
-kubectl -n "$NAMESPACE" get svc
+: "${ACR_NAME:?Set ACR_NAME (e.g. govacrcompany)}"
+: "${BASE_DOMAIN:?Set BASE_DOMAIN (e.g. apps.example.gov)}"
+: "${ARTIFACTORY_TOKEN:?Set ARTIFACTORY_TOKEN}"
 
-echo ""
-echo "── Ingress ──"
-kubectl -n "$NAMESPACE" get ingress 2>/dev/null || echo "(none)"
+ISTIO_REV="$(jq -r '.istio.revision' service.json)"
+SECRET_NAME="$(jq -r '.secrets[0].name' service.json)"
 
-echo ""
-echo "── Gallery probe (port-forward) ──"
-kubectl -n "$NAMESPACE" port-forward svc/code-marketplace 13001:3001 >/dev/null 2>&1 &
-PF=$!
-trap "kill $PF 2>/dev/null || true" EXIT
-sleep 2
+echo "── Namespace ──"
+kubectl get ns "$NAMESPACE" >/dev/null 2>&1 \
+  || kubectl create namespace "$NAMESPACE"
+kubectl label namespace "$NAMESPACE" "istio.io/rev=$ISTIO_REV" --overwrite
 
-if curl -fsS http://localhost:13001/healthz >/dev/null 2>&1; then
-  echo "  ✓ healthz OK"
-else
-  echo "  ✗ healthz FAILED"
-fi
+echo "── Secret ──"
+kubectl -n "$NAMESPACE" create secret generic "$SECRET_NAME" \
+  --from-literal=token="$ARTIFACTORY_TOKEN" \
+  --dry-run=client -o yaml | kubectl apply -f -
 
-EXT_COUNT=$(curl -fsS -X POST http://localhost:13001/_apis/public/gallery/extensionquery \
-  -H 'Content-Type: application/json' \
-  -d '{"filters":[{"criteria":[{"filterType":7,"value":""}]}],"flags":914}' \
-  2>/dev/null | jq '.results[0].extensions | length' 2>/dev/null || echo "?")
+echo "── Render values.yaml ──"
+# Pull in the exported vars (ACR_NAME, BASE_DOMAIN, ARTIFACTORY_SERVICENAME, etc.)
+[[ -f ./.env ]] && source ./.env
+RENDERED="$(mktemp -t values-rendered.XXXXXX.yaml)"
+trap 'rm -f "$RENDERED"' EXIT
+export ACR_NAME BASE_DOMAIN ARTIFACTORY_SERVICENAME HOST_PREFIX
+envsubst '${ACR_NAME} ${BASE_DOMAIN} ${ARTIFACTORY_SERVICENAME} ${HOST_PREFIX}' < values.yaml > "$RENDERED"
 
-echo "  Extensions visible: $EXT_COUNT"
+echo "── Helm upgrade ──"
+helm upgrade --install "$RELEASE_NAME" "$HELM_CHART_PATH" \
+  -n "$NAMESPACE" \
+  -f "$RENDERED" \
+  --wait --timeout 5m
+
+echo "── Rollout ──"
+kubectl -n "$NAMESPACE" rollout status deployment/"$RELEASE_NAME" --timeout=5m
+
+echo "✓ $SERVICE_NAME deployed to namespace=$NAMESPACE"
