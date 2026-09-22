@@ -1,0 +1,22 @@
+{
+  "name": "elastic",
+  "namespace": "elastic",
+  "istio": {
+    "revision": "asm-1-29"
+  },
+  "components": [
+    { "name": "elasticsearch", "exposed": false },
+    { "name": "kibana", "exposed": true }
+  ],
+  "secrets": [
+    {
+      "name": "elastic-credentials",
+      "keys": ["username", "password"],
+      "source": "env:ELASTIC_PASSWORD"
+    }
+  ],
+  "_notes": [
+    "istio.revision is read by scripts/deploy.sh and applied as the namespace label.",
+    "Chart refs live in service.conf once the deployment method is decided."
+  ]
+}

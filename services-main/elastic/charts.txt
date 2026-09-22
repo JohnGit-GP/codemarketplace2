@@ -1,0 +1,6 @@
+# Upstream Helm charts to mirror to Gov ACR as OCI artifacts.
+# Format: <name> <version> <source>
+#
+# TODO: fill in once the deployment method is chosen.
+# Note: Elastic's standalone elasticsearch/kibana Helm charts are deprecated in
+# favour of the ECK operator for 8.x. Confirm before committing to either path.

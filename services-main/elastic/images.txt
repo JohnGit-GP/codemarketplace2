@@ -1,0 +1,8 @@
+# Container images required by the elastic stack.
+# Mirrored to Gov ACR with scripts/mirror-images.sh (crane, no docker daemon needed).
+# Pin exact tags — never :latest. Verify each tag exists upstream before mirroring.
+#
+# TODO: fill in once the version is chosen. Expected shape:
+# docker.elastic.co/elasticsearch/elasticsearch:<VERSION>
+# docker.elastic.co/kibana/kibana:<VERSION>
+# docker.elastic.co/eck/eck-operator:<VERSION>      # only if using ECK

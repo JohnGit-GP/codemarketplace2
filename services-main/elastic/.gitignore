@@ -1,0 +1,9 @@
+# Local caches and transfer artifacts — never commit these.
+cache/
+backups/
+*.tar
+*.tgz
+*.vsix
+crane
+.env
+values-rendered.yaml
