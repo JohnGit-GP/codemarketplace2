@@ -1,0 +1,4 @@
+# Upstream manifests fetched on the connected side into cache/.
+# Format: <url> <cache filename>
+https://download.elastic.co/downloads/eck/3.5.0/crds.yaml     eck-crds.yaml
+https://download.elastic.co/downloads/eck/3.5.0/operator.yaml eck-operator.yaml

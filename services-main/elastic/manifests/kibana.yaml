@@ -1,0 +1,27 @@
+# Rendered by scripts/deploy.sh with envsubst. Variables: KIBANA_NAME NAMESPACE STACK_VERSION
+# ES_NAME KIBANA_HOST
+apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+metadata:
+  name: ${KIBANA_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  version: ${STACK_VERSION}
+  count: 1
+  elasticsearchRef:
+    name: ${ES_NAME}
+  config:
+    server.publicBaseUrl: https://${KIBANA_HOST}
+    # Air-gapped: stop Kibana trying to reach Elastic's internet services.
+    # Kibana will not start on an unknown key — re-check these against the 9.5 docs.
+    telemetry.optIn: false
+    telemetry.allowChangingOptInStatus: false
+    newsfeed.enabled: false
+    map.includeElasticMapsService: false
+    # SAML provider added in ticket 10.
+  podTemplate:
+    metadata:
+      annotations:
+        traffic.sidecar.istio.io/includeInboundPorts: "*"
+    spec:
+      automountServiceAccountToken: true

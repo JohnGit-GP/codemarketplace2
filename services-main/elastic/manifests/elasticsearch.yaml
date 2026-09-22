@@ -1,0 +1,49 @@
+# Rendered by scripts/deploy.sh with envsubst. Variables: ES_NAME NAMESPACE STACK_VERSION
+# ES_NODE_COUNT ES_DISK_SIZE ES_MEMORY STORAGE_CLASS ES_INGEST_HOST
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: ${ES_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  version: ${STACK_VERSION}
+  http:
+    tls:
+      selfSignedCertificate:
+        # In-cluster TLS stays on ECK's CA; the Iguana cert is served by the Istio gateway.
+        subjectAltNames:
+          - dns: ${ES_INGEST_HOST}
+  nodeSets:
+    - name: default
+      count: ${ES_NODE_COUNT}
+      config:
+        # Avoids the privileged vm.max_map_count init container.
+        node.store.allow_mmap: false
+        # SAML realm is added in ticket 10 — see manifests/saml-realm.example.yaml.
+      podTemplate:
+        metadata:
+          annotations:
+            # Transport (9300) is ECK-TLS'd and cannot be switched off; letting the
+            # sidecar proxy it double-encrypts inter-node traffic and breaks the cluster.
+            traffic.sidecar.istio.io/includeInboundPorts: "*"
+            traffic.sidecar.istio.io/excludeInboundPorts: "9300"
+            traffic.sidecar.istio.io/excludeOutboundPorts: "9300"
+        spec:
+          automountServiceAccountToken: true
+          containers:
+            - name: elasticsearch
+              resources:
+                requests:
+                  memory: ${ES_MEMORY}
+                  cpu: "1"
+                limits:
+                  memory: ${ES_MEMORY}
+      volumeClaimTemplates:
+        - metadata:
+            name: elasticsearch-data   # name is fixed by ECK
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            storageClassName: ${STORAGE_CLASS}
+            resources:
+              requests:
+                storage: ${ES_DISK_SIZE}

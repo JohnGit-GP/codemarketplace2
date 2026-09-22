@@ -1,56 +1,69 @@
 #!/usr/bin/env bash
-# Deploy the elastic stack to AKS.
-# Required env: ACR_NAME, BASE_DOMAIN, ELASTIC_PASSWORD
+# Deploy the ECK operator, license, Elasticsearch, and Kibana to aks-1.
+# Required env: ACR_NAME, STORAGE_CLASS
+# Optional env: LICENSE_FILE (Elastic Enterprise license JSON — required before SAML)
 set -euo pipefail
 
 SVC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"; cd "$SVC_DIR"
 # shellcheck source=../service.conf
 source ./service.conf
 
-: "${ACR_NAME:?Set ACR_NAME}"
-: "${BASE_DOMAIN:?Set BASE_DOMAIN (the Kibana hostname suffix)}"
-: "${ELASTIC_PASSWORD:?Set ELASTIC_PASSWORD}"
-
+: "${ACR_NAME:?Set ACR_NAME (no .azurecr.us)}"
+: "${STORAGE_CLASS:?Set STORAGE_CLASS (kubectl get storageclass)}"
+REGISTRY="$ACR_NAME.azurecr.us"
 ISTIO_REV="$(jq -r '.istio.revision' service.json)"
-SECRET_NAME="$(jq -r '.secrets[0].name' service.json)"
+
+for f in cache/eck-crds.yaml cache/eck-operator.yaml; do
+  [[ -f "$f" ]] || { echo "Missing $f — run mirror-images.sh pull on the connected side" >&2; exit 1; }
+done
+
+echo "── ECK CRDs ──"
+# Server-side apply: the CRDs exceed the size limit of client-side apply's annotation.
+kubectl apply --server-side -f cache/eck-crds.yaml
+
+echo "── ECK operator ($ECK_VERSION) ──"
+# Rewriting docker.elastic.co covers both the operator image and the operator's
+# container-registry setting, so every stack image resolves to the Gov ACR.
+# The operator namespace is NOT mesh-injected (PERMISSIVE mTLS; see README decision 1).
+sed "s#docker\.elastic\.co#${REGISTRY}#g" cache/eck-operator.yaml | kubectl apply -f -
+grep -q "container-registry: ${REGISTRY}" <(kubectl -n "$OPERATOR_NAMESPACE" get cm elastic-operator -o yaml) \
+  || { echo "Operator container-registry is not ${REGISTRY}" >&2; exit 1; }
+kubectl -n "$OPERATOR_NAMESPACE" rollout status statefulset/elastic-operator --timeout=5m
+
+if [[ -n "${LICENSE_FILE:-}" ]]; then
+  echo "── License ──"
+  kubectl -n "$OPERATOR_NAMESPACE" create secret generic eck-license \
+    --from-file=license="$LICENSE_FILE" --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n "$OPERATOR_NAMESPACE" label secret eck-license \
+    license.k8s.elastic.co/scope=operator --overwrite
+fi
 
 echo "── Namespace ──"
 kubectl get ns "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE"
 kubectl label namespace "$NAMESPACE" "istio.io/rev=$ISTIO_REV" --overwrite
 
-echo "── Secret ──"
-kubectl -n "$NAMESPACE" create secret generic "$SECRET_NAME" \
-  --from-literal=username=elastic \
-  --from-literal=password="$ELASTIC_PASSWORD" \
-  --dry-run=client -o yaml | kubectl apply -f -
+render() {
+  export ES_NAME KIBANA_NAME NAMESPACE STACK_VERSION ES_NODE_COUNT ES_DISK_SIZE \
+         ES_MEMORY STORAGE_CLASS KIBANA_HOST ES_INGEST_HOST
+  envsubst '${ES_NAME} ${KIBANA_NAME} ${NAMESPACE} ${STACK_VERSION} ${ES_NODE_COUNT} ${ES_DISK_SIZE} ${ES_MEMORY} ${STORAGE_CLASS} ${KIBANA_HOST} ${ES_INGEST_HOST}' < "$1"
+}
 
-echo "── Render values ──"
-[[ -f ./.env ]] && source ./.env
-RENDERED="$(mktemp -t values-rendered.XXXXXX.yaml)"
-trap 'rm -f "$RENDERED"' EXIT
-export ACR_NAME BASE_DOMAIN
-envsubst '${ACR_NAME} ${BASE_DOMAIN}' < values.yaml > "$RENDERED"
+echo "── Elasticsearch ──"
+render manifests/elasticsearch.yaml | kubectl apply -f -
+# StatefulSet with PVCs: first rollout and rolling restarts are slow.
+kubectl -n "$NAMESPACE" wait --for=jsonpath='{.status.health}'=green \
+  "elasticsearch/$ES_NAME" --timeout=20m
 
-echo "── Install ──"
-# TODO: fill in once the deployment method is decided.
-#
-#   ECK path:
-#     kubectl apply -f manifests/eck-operator.yaml       # CRDs + operator
-#     kubectl -n "$NAMESPACE" apply -f manifests/elasticsearch.yaml
-#     kubectl -n "$NAMESPACE" apply -f manifests/kibana.yaml
-#
-#   Helm path:
-#     helm upgrade --install "$ES_RELEASE_NAME" "$ES_CHART_REF" \
-#       --version "$CHART_VERSION" -n "$NAMESPACE" -f "$RENDERED" --wait --timeout 10m
-#     helm upgrade --install "$KIBANA_RELEASE_NAME" "$KIBANA_CHART_REF" \
-#       --version "$CHART_VERSION" -n "$NAMESPACE" -f "$RENDERED" --wait --timeout 10m
-#
-# Elasticsearch is a StatefulSet with PVCs - a rolling restart is slow and a
-# bad --wait timeout will abort mid-roll. Use 10m+, not the 5m used for
-# stateless services.
-echo "  NOT IMPLEMENTED - see TODO above"
-exit 1
+echo "── Kibana ──"
+render manifests/kibana.yaml | kubectl apply -f -
+kubectl -n "$NAMESPACE" wait --for=jsonpath='{.status.health}'=green \
+  "kibana/$KIBANA_NAME" --timeout=10m
 
-echo "── Rollout ──"
-kubectl -n "$NAMESPACE" rollout status statefulset/"$ES_RELEASE_NAME"-es --timeout=10m
-echo "✓ $SERVICE_NAME deployed to namespace=$NAMESPACE"
+if [[ -f manifests/istio.yaml ]]; then
+  echo "── Istio exposure ──"
+  render manifests/istio.yaml | kubectl apply -f -
+else
+  echo "── Istio exposure: skipped (manifests/istio.yaml pending README decision 1) ──"
+fi
+
+echo "✓ $SERVICE_NAME deployed to $CLUSTER namespace=$NAMESPACE"

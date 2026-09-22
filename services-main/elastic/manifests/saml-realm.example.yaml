@@ -1,0 +1,41 @@
+# NOT APPLIED — reference for ticket 10 (SAML with Entra ID). Requires the Enterprise license.
+#
+# 1. Elasticsearch: mount Entra's federation metadata XML as a file (no egress needed for
+#    metadata) and add this realm under nodeSets[].config in elasticsearch.yaml:
+#
+#      xpack.security.authc.realms.saml.saml1:
+#        order: 2
+#        idp.metadata.path: /usr/share/elasticsearch/config/saml/entra-metadata.xml
+#        idp.entity_id: "<entityID attribute from the metadata XML>"
+#        sp.entity_id: "https://kibana.snail.internal"
+#        sp.acs: "https://kibana.snail.internal/api/security/saml/callback"
+#        sp.logout: "https://kibana.snail.internal/logout"
+#        attributes.principal: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
+#        attributes.groups: "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
+#
+#    Mount via podTemplate: a ConfigMap `entra-saml-metadata` → /usr/share/elasticsearch/config/saml
+#
+# 2. Kibana: add providers to kibana.yaml config. Keep basic for break-glass admin access.
+#
+#      xpack.security.authc.providers:
+#        saml.saml1:
+#          order: 0
+#          realm: saml1
+#          description: "Log in with Snail account"
+#        basic.basic1:
+#          order: 1
+#
+# 3. Entra enterprise app (created by whoever owns the tenant):
+#      Identifier (Entity ID):  https://kibana.snail.internal
+#      Reply URL (ACS):         https://kibana.snail.internal/api/security/saml/callback
+#      Logout URL:              https://kibana.snail.internal/logout
+#      Groups claim:            Groups assigned to the application (avoids >150-group overage)
+#
+# 4. Role mappings (group object IDs from Entra, not display names):
+#
+#      PUT /_security/role_mapping/entra-<group>
+#      { "enabled": true,
+#        "roles": ["<es-role>"],
+#        "rules": { "all": [
+#          { "field": { "realm.name": "saml1" } },
+#          { "field": { "groups": "<entra-group-object-id>" } } ] } }

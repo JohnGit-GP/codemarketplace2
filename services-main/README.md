@@ -7,7 +7,7 @@ One folder per deployable service. Each service is self-contained — docs, Bice
 | Service | Status |
 |---|---|
 | [code-marketplace/](./code-marketplace/) | **Deployed — validated in TEST CUI.** VS Code Marketplace gallery for Gov Cloud, Artifactory-backed. |
-| [elastic/](./elastic/) | Scaffolded — deployment method not yet chosen. Elasticsearch + Kibana for tenant uptime/availability monitoring. |
+| [elastic/](./elastic/) | Design in progress. ECK on aks-1; Kibana SAML via Entra ID; Beats on aks-1, atl-aks, gl-aks for tenant uptime/availability. |
 
 Services still in the legacy `services-status/` layout (artifactory, jira, confluence, gitlab, rocketchat, cameo, argocd) will migrate here one at a time as they're worked on. See `../services-status/README.md` for the canonical service pipeline status.
 
