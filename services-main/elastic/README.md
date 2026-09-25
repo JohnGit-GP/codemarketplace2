@@ -71,7 +71,7 @@ flowchart LR
 | Monitored clusters | aks-1, atl-aks, gl-aks (then Azure metrics) | ticket |
 | Transport port | 9300 excluded from the Istio sidecar | ECK Istio guidance |
 | mmap | `node.store.allow_mmap: false` — avoids a privileged sysctl init container | locked-down AKS |
-| Storage | **`managed-csi-premium-retain`** — Premium SSD, `Retain`, `WaitForFirstConsumer` (`manifests/storageclass.yaml`) | aks-1 `kubectl get storageclass`; every built-in disk class is `Delete` |
+| Storage | **`managed-csi-premium-retain`** proposed — Premium SSD, `Retain`, `WaitForFirstConsumer` (`manifests/storageclass.yaml`). **Pending team-lead confirmation** of tier and reclaim policy. Kibana needs no storage. | aks-1 `kubectl get storageclass`; every built-in disk class is `Delete` |
 
 ## Environment facts
 
@@ -82,7 +82,7 @@ flowchart LR
 | | Value |
 |---|---|
 | Cloud | Azure Government |
-| Istio revision | `asm-1-29` — namespace label `istio.io/rev=asm-1-29` |
+| Istio revision | `asm-1-29` — namespace label `istio.io/rev=asm-1-29` — **✓ verified on aks-1** |
 | Istio mTLS | PERMISSIVE (observed) |
 | Ingress | `aks-istio-ingress` ns, svc `aks-istio-ingressgateway-internal` |
 | **Gateway TLS secrets** | live in **`aks-istio-ingress`**, not the app namespace |
