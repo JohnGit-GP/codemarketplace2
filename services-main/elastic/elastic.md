@@ -43,8 +43,8 @@ kubectl -n aks-istio-ingress get svc aks-istio-ingressgateway-internal \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}{"\n"}'     # A records → this IP
 ```
 
-The dog-ops Issuing CA is name-constrained to `snail.internal` — it will refuse
-`elasticsearch.iguana.internal`. See the certificate conflict note in `README.md`.
+Both certs are for `iguana.internal` — request them from the CA that covers that domain, not the
+dog-ops Issuing CA (constrained to `snail.internal`). DNS records go in the `iguana.internal` zone.
 
 ## Tickets 4 and 5 — Elasticsearch and Kibana
 
@@ -83,7 +83,7 @@ the Gateway + VirtualServices. Verify before DNS propagates:
 
 ```bash
 IP=<gateway-ip>
-curl -v --resolve kibana.snail.internal:443:$IP    https://kibana.snail.internal/api/status
+curl -v --resolve kibana.iguana.internal:443:$IP        https://kibana.iguana.internal/api/status
 curl -v --resolve elasticsearch.iguana.internal:443:$IP https://elasticsearch.iguana.internal/
 ```
 

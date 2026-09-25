@@ -15,13 +15,13 @@ so that I can comply with SLAs and Cyber requirements.*
 | AC | Criterion | Verified by |
 |---|---|---|
 | AC1 | Elastic is available as a data resource for tenant metric monitoring | ES cluster green on aks-1; Metricbeat + Heartbeat data arriving from aks-1, atl-aks, gl-aks |
-| AC2 | Kibana is available as a data resource for tenant metric monitoring | Tenant signs in to `https://kibana.snail.internal` with their Snail account via SAML and sees the baseline uptime/availability dashboard |
+| AC2 | Kibana is available as a data resource for tenant metric monitoring | Tenant signs in to `https://kibana.iguana.internal` with their Snail account via SAML and sees the baseline uptime/availability dashboard |
 
 ## Scope
 
 **In:** ECK operator + CRDs on aks-1 · Elasticsearch + Kibana with persistent storage ·
 Kibana SAML with Entra ID and group→role mapping · Kibana and ES ingest endpoint exposed through
-the aks-1 Istio internal gateway with certs from the **Iguana dog-ops Issuing CA** · network paths
+the aks-1 Istio internal gateway over TLS · network paths
 from monitored clusters to aks-1 · Metricbeat + Heartbeat on aks-1, atl-aks, gl-aks, then Azure
 metrics · baseline uptime/availability dashboard.
 
@@ -50,7 +50,7 @@ flowchart LR
     A3 -->|"elasticsearch.iguana.internal:443"| GW
     GW --> ES
     ES --> KB
-    User -->|"kibana.snail.internal:443"| GW
+    User -->|"kibana.iguana.internal:443"| GW
     GW --> KB
     User <-->|"SAML redirect"| Entra
 ```
@@ -64,9 +64,9 @@ flowchart LR
 | ECK version | **3.5.0** | latest release |
 | Stack version | **9.5.4** (Elasticsearch, Kibana, Metricbeat, Heartbeat) | latest 9.x release |
 | Namespaces | `elastic` (stack), `elastic-system` (operator) | ECK convention |
-| Hostnames | `kibana.snail.internal`, `elasticsearch.iguana.internal` — **⚠ see CA conflict below** | confirmed by you |
+| Hostnames | **`kibana.iguana.internal`**, **`elasticsearch.iguana.internal`** | confirmed by you |
 | TLS model | **Istio.** ECK HTTP TLS disabled; Istio mTLS **STRICT** in `elastic`; operator namespace in the mesh with webhook port 9443 excluded; gateway terminates TLS at the edge | confirmed by you |
-| Certificates | Iguana dog-ops Issuing CA — **name-constrained to `snail.internal`** | ticket |
+| Certificates | Issued for `iguana.internal` — **not** the dog-ops Issuing CA, which is constrained to `snail.internal`. Issuing CA to confirm; see note below | confirmed by you |
 | Kibana auth | SAML via Entra ID + a `basic` provider kept for break-glass | ticket |
 | License | **Elastic Enterprise** — required for SAML | ticket |
 | Monitored clusters | aks-1, atl-aks, gl-aks (then Azure metrics) | ticket |
@@ -74,17 +74,18 @@ flowchart LR
 | mmap | `node.store.allow_mmap: false` — avoids a privileged sysctl init container | locked-down AKS |
 | Storage | **`managed-csi-premium-retain`** — Premium SSD, `Retain`, `WaitForFirstConsumer` (`manifests/storageclass.yaml`). Kibana needs no storage. | confirmed; every built-in disk class on aks-1 is `Delete` |
 
-## ⚠ Certificate conflict — blocks ticket 3
+## Note: deviation from the ticket text
 
-`elasticsearch.iguana.internal` is **outside** the Iguana dog-ops Issuing CA's name constraint
-(`snail.internal`). That CA will refuse to issue it, and any cert it did issue would fail client
-validation. Resolve one way or the other before requesting certs:
+The ticket says certificates come from the **Iguana dog-ops Issuing CA** and follow
+`<svc>.snail.internal`. Both hostnames were changed to **`iguana.internal`**, which that CA cannot
+issue (it is name-constrained to `snail.internal`). So:
 
-- **Typo →** use `elasticsearch.snail.internal`: change `ES_HOST` in `service.conf`, done.
-- **Intentional →** `elasticsearch.iguana.internal` comes from a *different* CA (whichever issued
-  `vscode-marketplace.iguana.internal`). Then the Beat pods on every spoke must trust **that** CA's
-  chain as well as the dog-ops one, and the DNS record lives in the `iguana.internal` zone, not
-  `snail.internal`.
+- **Both certs come from whichever CA covers `iguana.internal`** — most likely the one that issued
+  `vscode-marketplace.iguana.internal`. Confirm before requesting certs (ticket 3).
+- **Beat pods on atl-aks and gl-aks must trust that CA's chain**, and workstations must too for
+  Kibana — the same root + issuing CA already deployed for the VS Code marketplace, if it's the same CA.
+- **DNS records go in the `iguana.internal` zone.**
+- **Update the ticket text** so a reviewer doesn't flag the mismatch.
 
 ## Environment facts
 
@@ -107,8 +108,8 @@ validation. Resolve one way or the other before requesting certs:
 
 - **9300 must bypass the sidecar.** Otherwise inter-node transport is encrypted twice and the
   cluster never forms. The annotations are in `manifests/elasticsearch.yaml`.
-- **The CA can't sign cluster-local names** (name-constrained to `snail.internal`). Moot under the
-  Istio TLS model — in-cluster encryption is mesh mTLS, and Iguana certs live only at the gateway.
+- **Gateway certs can't cover cluster-local names**, and don't need to: under the Istio TLS model
+  in-cluster encryption is mesh mTLS, and the `iguana.internal` certs live only at the gateway.
 - **Never deploy ES/Kibana without the STRICT PeerAuthentication.** Their HTTP TLS is off; STRICT is
   the only thing stopping plaintext reads from a pod without a sidecar. `deploy.sh` applies it first.
 - **The operator's webhook port (9443) must bypass its sidecar.** The API server isn't in the mesh;

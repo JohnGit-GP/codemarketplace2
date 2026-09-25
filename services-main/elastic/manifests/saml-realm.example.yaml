@@ -7,9 +7,9 @@
 #        order: 2
 #        idp.metadata.path: /usr/share/elasticsearch/config/saml/entra-metadata.xml
 #        idp.entity_id: "<entityID attribute from the metadata XML>"
-#        sp.entity_id: "https://kibana.snail.internal"
-#        sp.acs: "https://kibana.snail.internal/api/security/saml/callback"
-#        sp.logout: "https://kibana.snail.internal/logout"
+#        sp.entity_id: "https://kibana.iguana.internal"
+#        sp.acs: "https://kibana.iguana.internal/api/security/saml/callback"
+#        sp.logout: "https://kibana.iguana.internal/logout"
 #        attributes.principal: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
 #        attributes.groups: "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
 #
@@ -26,9 +26,9 @@
 #          order: 1
 #
 # 3. Entra enterprise app (created by whoever owns the tenant):
-#      Identifier (Entity ID):  https://kibana.snail.internal
-#      Reply URL (ACS):         https://kibana.snail.internal/api/security/saml/callback
-#      Logout URL:              https://kibana.snail.internal/logout
+#      Identifier (Entity ID):  https://kibana.iguana.internal
+#      Reply URL (ACS):         https://kibana.iguana.internal/api/security/saml/callback
+#      Logout URL:              https://kibana.iguana.internal/logout
 #      Groups claim:            Groups assigned to the application (avoids >150-group overage)
 #
 # 4. Role mappings (group object IDs from Entra, not display names):

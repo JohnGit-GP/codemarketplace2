@@ -27,7 +27,7 @@ flowchart LR
 
 ### 0 — Design decisions and approvals
 Resolve the *Open decisions* in `README.md`: tenant isolation, remote Beats delivery,
-retention, Azure metrics access. **Resolve the certificate conflict** for `elasticsearch.iguana.internal`.
+retention, Azure metrics access. **Confirm the issuing CA for `iguana.internal`**, and update the ticket text (it still says dog-ops CA / `snail.internal`).
 ~~TLS model~~ (Istio) · ~~StorageClass~~ · ~~hostnames~~ decided.
 **Start the long-lead items here:** license procurement (ticket 9), cert request (ticket 3),
 firewall change request (ticket 6).
@@ -48,10 +48,10 @@ Install CRDs and operator (first half of `deploy.sh`).
 **Done when:** `elastic-operator` Running in `elastic-system`; operator config shows the Gov ACR as `container-registry`.
 
 ### 3 — Certificates and DNS
-Request `kibana.snail.internal` from the **Iguana dog-ops Issuing CA**, and `elasticsearch.iguana.internal`
-from whichever CA the README conflict note resolves to.
+Request `kibana.iguana.internal` and `elasticsearch.iguana.internal` from the CA that covers `iguana.internal`
+(confirm which — not the dog-ops Issuing CA, see README).
 Create `kibana-tls` and `elasticsearch-tls` in `aks-istio-ingress`. A records for both → aks-1 internal gateway IP.
-**Blocked by:** 0 (certificate conflict resolved)
+**Blocked by:** 0 (issuing CA for `iguana.internal` confirmed)
 **Done when:** both secrets exist; SANs verified with `openssl x509 -ext subjectAltName`; both names resolve from aks-1, atl-aks, and gl-aks.
 
 ### 4 — Elasticsearch
@@ -63,7 +63,7 @@ Deploy via `deploy.sh`. Configure snapshot repository and ILM retention per tick
 Deploy Kibana and apply `manifests/istio.yaml` (Gateway + VirtualServices; no DestinationRules — the
 mesh handles gateway→pod mTLS). Confirm the gateway selector label on aks-1 first.
 **Blocked by:** 3, 4
-**Done when:** `https://kibana.snail.internal/api/status` → 200 and `https://elasticsearch.iguana.internal` answers, both through the gateway with the Iguana cert presented; `elastic` user can log in.
+**Done when:** `https://kibana.iguana.internal/api/status` → 200 and `https://elasticsearch.iguana.internal` answers, both through the gateway with the Iguana cert presented; `elastic` user can log in.
 
 ### 6 — Network paths from monitored clusters
 Firewall / NSG / UDR change: atl-aks and gl-aks egress → aks-1 internal gateway IP, TCP 443.
