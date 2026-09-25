@@ -1,0 +1,15 @@
+# Rendered by scripts/deploy.sh. Variables: NAMESPACE
+#
+# REQUIRED by the TLS model: ECK's HTTP TLS is disabled, so Istio mTLS is the only thing
+# encrypting 9200/5601 inside the cluster. STRICT makes the sidecars refuse any plaintext
+# connection — without it, a pod with no sidecar could read Elasticsearch over plain HTTP.
+#
+# Port 9300 (transport) is excluded from the sidecar entirely and keeps ECK's own TLS.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: strict
+  namespace: ${NAMESPACE}
+spec:
+  mtls:
+    mode: STRICT

@@ -10,6 +10,11 @@ spec:
   count: 1
   elasticsearchRef:
     name: ${ES_NAME}
+  http:
+    tls:
+      selfSignedCertificate:
+        # Plain HTTP on 5601 inside the pod; Istio mTLS STRICT covers the hop.
+        disabled: true
   config:
     server.publicBaseUrl: https://${KIBANA_HOST}
     # Air-gapped: stop Kibana trying to reach Elastic's internet services.

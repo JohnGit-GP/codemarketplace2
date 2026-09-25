@@ -26,8 +26,9 @@ flowchart LR
 ---
 
 ### 0 — Design decisions and approvals
-Resolve the *Open decisions* in `README.md`: gateway→backend TLS model, tenant isolation,
-remote Beats delivery, sizing and retention, Azure metrics access. Confirm hostnames.
+Resolve the *Open decisions* in `README.md`: tenant isolation, remote Beats delivery,
+retention, Azure metrics access. **Resolve the certificate conflict** for `elasticsearch.iguana.internal`.
+~~TLS model~~ (Istio) · ~~StorageClass~~ · ~~hostnames~~ decided.
 **Start the long-lead items here:** license procurement (ticket 9), cert request (ticket 3),
 firewall change request (ticket 6).
 **Done when:** every open decision has a written answer in `README.md`.
@@ -47,9 +48,10 @@ Install CRDs and operator (first half of `deploy.sh`).
 **Done when:** `elastic-operator` Running in `elastic-system`; operator config shows the Gov ACR as `container-registry`.
 
 ### 3 — Certificates and DNS
-Request `kibana.snail.internal` and `es-ingest.snail.internal` from the **Iguana dog-ops Issuing CA**.
-Create `kibana-tls` and `es-ingest-tls` in `aks-istio-ingress`. A records for both → aks-1 internal gateway IP.
-**Blocked by:** 0 (hostnames confirmed)
+Request `kibana.snail.internal` from the **Iguana dog-ops Issuing CA**, and `elasticsearch.iguana.internal`
+from whichever CA the README conflict note resolves to.
+Create `kibana-tls` and `elasticsearch-tls` in `aks-istio-ingress`. A records for both → aks-1 internal gateway IP.
+**Blocked by:** 0 (certificate conflict resolved)
 **Done when:** both secrets exist; SANs verified with `openssl x509 -ext subjectAltName`; both names resolve from aks-1, atl-aks, and gl-aks.
 
 ### 4 — Elasticsearch
@@ -58,14 +60,15 @@ Deploy via `deploy.sh`. Configure snapshot repository and ILM retention per tick
 **Done when:** `kubectl get elasticsearch` HEALTH green; all PVCs Bound; one snapshot succeeds; ILM policy attached.
 
 ### 5 — Kibana and gateway exposure
-Deploy Kibana. Write and apply `manifests/istio.yaml` (Gateway, VirtualServices, DestinationRules per decision 1).
+Deploy Kibana and apply `manifests/istio.yaml` (Gateway + VirtualServices; no DestinationRules — the
+mesh handles gateway→pod mTLS). Confirm the gateway selector label on aks-1 first.
 **Blocked by:** 3, 4
-**Done when:** `https://kibana.snail.internal/api/status` → 200 and `https://es-ingest.snail.internal` answers, both through the gateway with the Iguana cert presented; `elastic` user can log in.
+**Done when:** `https://kibana.snail.internal/api/status` → 200 and `https://elasticsearch.iguana.internal` answers, both through the gateway with the Iguana cert presented; `elastic` user can log in.
 
 ### 6 — Network paths from monitored clusters
 Firewall / NSG / UDR change: atl-aks and gl-aks egress → aks-1 internal gateway IP, TCP 443.
 **Blocked by:** 0 (gateway IP known from ticket 3)
-**Done when:** `curl -v https://es-ingest.snail.internal` from a pod in each spoke completes the TLS handshake.
+**Done when:** `curl -v https://elasticsearch.iguana.internal` from a pod in each spoke completes the TLS handshake.
 
 ### 7 — Metricbeat and Heartbeat on aks-1
 Beat CRs with `elasticsearchRef` (same cluster). Kubernetes module; Heartbeat monitors for aks-1 TEST services.
@@ -73,7 +76,7 @@ Beat CRs with `elasticsearchRef` (same cluster). Kubernetes module; Heartbeat mo
 **Done when:** `metricbeat-*` and `heartbeat-*` data from aks-1 visible in Kibana Discover.
 
 ### 8 — Metricbeat and Heartbeat on atl-aks and gl-aks
-Per-cluster API key (write-only to Beat indices), Iguana CA trust in the Beat pods, output to `es-ingest.snail.internal:443`.
+Per-cluster API key (write-only to Beat indices), Iguana CA trust in the Beat pods, output to `elasticsearch.iguana.internal:443`.
 **Blocked by:** 5, 6
 **Done when:** data from both spokes visible in Kibana, tagged with its source cluster.
 

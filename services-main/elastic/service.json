@@ -8,7 +8,7 @@
   },
   "components": [
     { "name": "eck-operator",  "cluster": "aks-1",                  "exposed": false },
-    { "name": "elasticsearch", "cluster": "aks-1",                  "exposed": true,  "host": "es-ingest.snail.internal" },
+    { "name": "elasticsearch", "cluster": "aks-1",                  "exposed": true,  "host": "elasticsearch.iguana.internal" },
     { "name": "kibana",        "cluster": "aks-1",                  "exposed": true,  "host": "kibana.snail.internal" },
     { "name": "metricbeat",    "cluster": ["aks-1","atl-aks","gl-aks"], "exposed": false },
     { "name": "heartbeat",     "cluster": ["aks-1","atl-aks","gl-aks"], "exposed": false }
@@ -16,7 +16,8 @@
   "tls": {
     "issuer": "Iguana dog-ops Issuing CA",
     "nameConstraint": "snail.internal",
-    "gatewaySecrets": ["kibana-tls", "es-ingest-tls"],
+    "gatewaySecrets": ["kibana-tls", "elasticsearch-tls"],
+    "inCluster": "Istio mTLS STRICT in the elastic namespace; ECK HTTP TLS disabled",
     "gatewaySecretNamespace": "aks-istio-ingress"
   },
   "secrets": [

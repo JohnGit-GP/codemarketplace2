@@ -1,5 +1,5 @@
 # Rendered by scripts/deploy.sh with envsubst. Variables: ES_NAME NAMESPACE STACK_VERSION
-# ES_NODE_COUNT ES_DISK_SIZE ES_MEMORY STORAGE_CLASS ES_INGEST_HOST
+# ES_NODE_COUNT ES_DISK_SIZE ES_MEMORY STORAGE_CLASS
 apiVersion: elasticsearch.k8s.elastic.co/v1
 kind: Elasticsearch
 metadata:
@@ -10,9 +10,10 @@ spec:
   http:
     tls:
       selfSignedCertificate:
-        # In-cluster TLS stays on ECK's CA; the Iguana cert is served by the Istio gateway.
-        subjectAltNames:
-          - dns: ${ES_INGEST_HOST}
+        # HTTP (9200) is plain inside the pod; Istio mTLS (STRICT, manifests/peerauthentication.yaml)
+        # encrypts every hop in the mesh and the gateway terminates TLS at the edge.
+        # Do NOT deploy this without the STRICT PeerAuthentication in place.
+        disabled: true
   nodeSets:
     - name: default
       count: ${ES_NODE_COUNT}

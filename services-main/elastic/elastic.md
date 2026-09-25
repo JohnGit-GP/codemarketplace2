@@ -34,16 +34,17 @@ if you're closing this ticket separately.
 ## Ticket 3 — Certificates and DNS
 
 ```bash
-for c in kibana es-ingest; do
+for c in kibana elasticsearch; do
   openssl x509 -in $c-fullchain.crt -noout -ext subjectAltName -dates
 done
-kubectl -n aks-istio-ingress create secret tls kibana-tls    --cert=kibana-fullchain.crt    --key=kibana.key
-kubectl -n aks-istio-ingress create secret tls es-ingest-tls --cert=es-ingest-fullchain.crt --key=es-ingest.key
+kubectl -n aks-istio-ingress create secret tls kibana-tls        --cert=kibana-fullchain.crt        --key=kibana.key
+kubectl -n aks-istio-ingress create secret tls elasticsearch-tls --cert=elasticsearch-fullchain.crt --key=elasticsearch.key
 kubectl -n aks-istio-ingress get svc aks-istio-ingressgateway-internal \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}{"\n"}'     # A records → this IP
 ```
 
-The CA is name-constrained to `snail.internal`; a request for any other name will be refused.
+The dog-ops Issuing CA is name-constrained to `snail.internal` — it will refuse
+`elasticsearch.iguana.internal`. See the certificate conflict note in `README.md`.
 
 ## Tickets 4 and 5 — Elasticsearch and Kibana
 
@@ -66,16 +67,24 @@ Test Kibana before exposing it:
 
 ```bash
 kubectl -n elastic port-forward svc/kibana-kb-http 5601
-# https://localhost:5601  (ECK self-signed cert — expected browser warning)
+# http://localhost:5601 — plain HTTP by design; in-cluster encryption is Istio mTLS
 ```
 
-**Gateway exposure** (`manifests/istio.yaml`) is written once README decision 1 is made.
-Verify before DNS propagates:
+Confirm STRICT is actually enforced — this must **fail**, since the test pod has no sidecar:
+
+```bash
+kubectl run mtls-probe --rm -i --restart=Never -n default --image=curlimages/curl -- \
+  curl -sS -m 5 http://elasticsearch-es-http.elastic.svc:9200/ ; echo "exit=$?"
+# expect a connection reset / non-zero exit. A JSON response means STRICT is NOT in force.
+```
+
+`deploy.sh` finishes by applying the STRICT PeerAuthentication (first, before any workload) and
+the Gateway + VirtualServices. Verify before DNS propagates:
 
 ```bash
 IP=<gateway-ip>
 curl -v --resolve kibana.snail.internal:443:$IP    https://kibana.snail.internal/api/status
-curl -v --resolve es-ingest.snail.internal:443:$IP https://es-ingest.snail.internal/
+curl -v --resolve elasticsearch.iguana.internal:443:$IP https://elasticsearch.iguana.internal/
 ```
 
 ## Ticket 9 — License

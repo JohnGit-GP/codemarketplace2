@@ -1,0 +1,52 @@
+# Rendered by scripts/deploy.sh. Variables: NAMESPACE ES_NAME KIBANA_NAME KIBANA_HOST ES_HOST
+# ISTIO_INGRESS_SELECTOR
+#
+# The gateway terminates TLS with the certs in aks-istio-ingress (credentialName resolves in
+# the gateway workload's namespace, not this one). Gateway → pod is Istio mTLS automatically;
+# no DestinationRule is needed because ES and Kibana serve plain HTTP behind their sidecars.
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: elastic
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    istio: ${ISTIO_INGRESS_SELECTOR}
+  servers:
+    - port: { number: 443, name: https-kibana, protocol: HTTPS }
+      tls: { mode: SIMPLE, credentialName: kibana-tls }
+      hosts: ["${KIBANA_HOST}"]
+    - port: { number: 443, name: https-elasticsearch, protocol: HTTPS }
+      tls: { mode: SIMPLE, credentialName: elasticsearch-tls }
+      hosts: ["${ES_HOST}"]
+    - port: { number: 80, name: http-kibana, protocol: HTTP }
+      tls: { httpsRedirect: true }
+      hosts: ["${KIBANA_HOST}"]
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: kibana
+  namespace: ${NAMESPACE}
+spec:
+  hosts: ["${KIBANA_HOST}"]
+  gateways: ["elastic"]
+  http:
+    - route:
+        - destination:
+            host: ${KIBANA_NAME}-kb-http.${NAMESPACE}.svc.cluster.local   # ECK service name
+            port: { number: 5601 }
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: elasticsearch
+  namespace: ${NAMESPACE}
+spec:
+  hosts: ["${ES_HOST}"]
+  gateways: ["elastic"]
+  http:
+    - route:
+        - destination:
+            host: ${ES_NAME}-es-http.${NAMESPACE}.svc.cluster.local       # ECK service name
+            port: { number: 9200 }
