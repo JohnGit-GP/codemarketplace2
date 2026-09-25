@@ -85,7 +85,7 @@ flowchart LR
 | Cloud | Azure Government |
 | Istio revision | `asm-1-29` — namespace label `istio.io/rev=asm-1-29` — **✓ verified on aks-1** |
 | Istio mTLS | PERMISSIVE (observed) |
-| Ingress | `aks-istio-ingress` ns, svc `aks-istio-ingressgateway-internal` |
+| Ingress | `aks-istio-ingress` ns, label `istio=aks-istio-ingressgateway-internal` — **✓ verified on aks-1** |
 | **Gateway TLS secrets** | live in **`aks-istio-ingress`**, not the app namespace |
 | Sidecars | native — pods show `Init:1/2` permanently with `READY 1/1`. Normal. |
 | Image transfer | `crane` with `--platform linux/amd64`; no docker on either host |
