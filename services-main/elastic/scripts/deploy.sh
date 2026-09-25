@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploy the ECK operator, license, Elasticsearch, and Kibana to aks-1.
-# Required env: ACR_NAME, STORAGE_CLASS
+# Required env: ACR_NAME   (STORAGE_CLASS defaults from service.conf)
 # Optional env: LICENSE_FILE (Elastic Enterprise license JSON — required before SAML)
 set -euo pipefail
 
@@ -9,7 +9,6 @@ SVC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"; cd "$SVC_DIR"
 source ./service.conf
 
 : "${ACR_NAME:?Set ACR_NAME (no .azurecr.us)}"
-: "${STORAGE_CLASS:?Set STORAGE_CLASS (kubectl get storageclass)}"
 REGISTRY="$ACR_NAME.azurecr.us"
 ISTIO_REV="$(jq -r '.istio.revision' service.json)"
 
@@ -47,6 +46,11 @@ render() {
          ES_MEMORY STORAGE_CLASS KIBANA_HOST ES_INGEST_HOST
   envsubst '${ES_NAME} ${KIBANA_NAME} ${NAMESPACE} ${STACK_VERSION} ${ES_NODE_COUNT} ${ES_DISK_SIZE} ${ES_MEMORY} ${STORAGE_CLASS} ${KIBANA_HOST} ${ES_INGEST_HOST}' < "$1"
 }
+
+echo "── StorageClass ──"
+kubectl apply -f manifests/storageclass.yaml
+kubectl get storageclass "$STORAGE_CLASS" >/dev/null \
+  || { echo "StorageClass $STORAGE_CLASS not found" >&2; exit 1; }
 
 echo "── Elasticsearch ──"
 render manifests/elasticsearch.yaml | kubectl apply -f -

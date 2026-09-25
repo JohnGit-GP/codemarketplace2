@@ -71,10 +71,13 @@ flowchart LR
 | Monitored clusters | aks-1, atl-aks, gl-aks (then Azure metrics) | ticket |
 | Transport port | 9300 excluded from the Istio sidecar | ECK Istio guidance |
 | mmap | `node.store.allow_mmap: false` — avoids a privileged sysctl init container | locked-down AKS |
+| Storage | **`managed-csi-premium-retain`** — Premium SSD, `Retain`, `WaitForFirstConsumer` (`manifests/storageclass.yaml`) | aks-1 `kubectl get storageclass`; every built-in disk class is `Delete` |
 
-## Environment facts (verified on the code-marketplace cluster)
+## Environment facts
 
-> **Re-verify on aks-1** if code-marketplace is not deployed there.
+> **⚠ UNVERIFIED FOR aks-1.** These were verified on the code-marketplace cluster, which is
+> **not** aks-1. Treat every row as an assumption until checked on aks-1 — the mTLS mode in
+> particular feeds open decision 1.
 
 | | Value |
 |---|---|
@@ -114,7 +117,7 @@ flowchart LR
    document-level security) or one shared view?
 3. **Remote Beats delivery.** ECK operator is scoped to aks-1. On atl-aks / gl-aks, deploy
    Beats as plain manifests (recommended — no CRDs on every cluster) or install ECK there too?
-4. **Sizing** — node count, disk per node, retention period.
+4. **Sizing** — node count, disk per node, retention period. (StorageClass decided.)
 5. **Azure metrics** — needs Azure Monitor API egress from aks-1 and a service principal.
 
 ## File index

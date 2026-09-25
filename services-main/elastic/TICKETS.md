@@ -39,8 +39,10 @@ Bundle with the `crane` binary, transfer to the air-gapped host.
 **Done when:** every image in `images.txt` and every file in `manifests.txt` is in `cache/` on the air-gapped host.
 
 ### 2 — aks-1 platform prep and ECK operator
-Push images to ACR (`mirror-images.sh push`, arch verified amd64). Confirm StorageClass and
-reclaim policy. Install CRDs and operator (first half of `deploy.sh`).
+Verify aks-1 environment facts (Istio revision, gateway, mTLS mode, ACR attachment) and
+update `README.md`. Push images to ACR (`mirror-images.sh push`, arch verified amd64).
+Create `managed-csi-premium-retain` after diffing against `managed-csi-premium`.
+Install CRDs and operator (first half of `deploy.sh`).
 **Blocked by:** 1
 **Done when:** `elastic-operator` Running in `elastic-system`; operator config shows the Gov ACR as `container-registry`.
 
