@@ -91,8 +91,8 @@ flowchart LR
 | **Gateway TLS secrets** | live in **`aks-istio-ingress`**, not the app namespace |
 | Sidecars | native — pods show `Init:1/2` permanently with `READY 1/1`. Normal. |
 | Registry | Gov ACR (name supplied at runtime via `ACR_NAME`) — **✓ aks-1 pull access confirmed** (prior deployments) |
-| Image transfer | `crane` with `--platform linux/amd64`; no docker on either host |
-| ACR auth (air-gap) | `az acr login --expose-token` → `crane auth login` |
+| Image transfer | `docker pull --platform linux/amd64` + `docker save` → tar → `docker load` + push |
+| ACR auth | `az acr login -n <acr>` |
 
 ## Gotchas carried forward
 
@@ -141,6 +141,6 @@ flowchart LR
 | `manifests/storageclass.yaml` | `managed-csi-premium-retain` |
 | `manifests/es-api/ilm-beats-30d.json` | ILM policy: daily rollover, delete at 30 days |
 | `manifests/es-api/slm-nightly.json` | Nightly snapshots, 30-day expiry |
-| `scripts/mirror-images.sh` | `crane` pull/push + upstream manifest fetch — **working** |
+| `scripts/mirror-images.sh` | Docker pull/save + load/tag/push, arch-checked; fetches ECK manifests |
 | `scripts/deploy.sh` | `operator` (CRDs, meshed operator, license) · `stack` (STRICT mTLS, storage, ES, Kibana, gateway) · `all` |
 | `scripts/check-status.sh` | ECK resource health, PVCs, routing, events |

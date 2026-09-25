@@ -17,7 +17,7 @@ the stack later is a change to `version` in those manifests — the operator rol
 ```bash
 cd services-main/elastic
 ./scripts/mirror-images.sh pull
-tar -czf elastic-bundle.tar.gz cache/ crane      # crane = the Linux binary
+tar -czf elastic-bundle.tar.gz cache/
 scp elastic-bundle.tar.gz <user>@<airgap-host>:~/
 ```
 
@@ -25,9 +25,9 @@ scp elastic-bundle.tar.gz <user>@<airgap-host>:~/
 ```bash
 tar -xzf ~/elastic-bundle.tar.gz -C services-main/elastic/
 cd services-main/elastic
-export PATH="$PWD:$PATH" ACR_NAME=<acr-name>
+export ACR_NAME=<acr-name>
 kubectl config current-context                   # must be aks-1
-./scripts/mirror-images.sh push                  # verifies linux/amd64
+./scripts/mirror-images.sh push                  # load, arch-check, tag, push
 ./scripts/deploy.sh operator
 kubectl -n elastic-system get pods               # elastic-operator Running
 ```
