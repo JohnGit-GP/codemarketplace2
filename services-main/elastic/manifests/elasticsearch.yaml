@@ -20,7 +20,7 @@ spec:
       config:
         # Avoids the privileged vm.max_map_count init container.
         node.store.allow_mmap: false
-        # SAML realm is added in ticket 10 — see manifests/saml-realm.example.yaml.
+        # SAML realm is added in ticket 5 — see manifests/saml-realm.example.yaml.
       podTemplate:
         metadata:
           annotations:

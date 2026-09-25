@@ -1,5 +1,5 @@
 {
-  "_comment": "PUT _slm/policy/nightly  — requires the azure-snapshots repository (ticket 4). Expires at 30 days to match data retention.",
+  "_comment": "PUT _slm/policy/nightly  — requires the azure-snapshots repository (ticket 3). Expires at 30 days to match data retention.",
   "schedule": "0 30 1 * * ?",
   "name": "<nightly-{now/d}>",
   "repository": "azure-snapshots",

@@ -1,4 +1,4 @@
-# NOT APPLIED — reference for ticket 10 (SAML with Entra ID). Requires the Enterprise license.
+# NOT APPLIED — reference for ticket 5 (SAML with Entra ID). Requires the Enterprise license.
 #
 # 1. Elasticsearch: mount Entra's federation metadata XML as a file (no egress needed for
 #    metadata) and add this realm under nodeSets[].config in elasticsearch.yaml:

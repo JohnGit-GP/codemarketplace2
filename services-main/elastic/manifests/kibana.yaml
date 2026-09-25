@@ -23,7 +23,7 @@ spec:
     telemetry.allowChangingOptInStatus: false
     newsfeed.enabled: false
     map.includeElasticMapsService: false
-    # SAML provider added in ticket 10.
+    # SAML provider added in ticket 5.
   podTemplate:
     metadata:
       annotations:
