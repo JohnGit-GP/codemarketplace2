@@ -14,8 +14,8 @@
     { "name": "heartbeat",     "cluster": ["aks-1","atl-aks","gl-aks"], "exposed": false }
   ],
   "tls": {
-    "issuer": "CA that issues iguana.internal (same as vscode-marketplace.iguana.internal) - to confirm",
-    "domain": "iguana.internal",
+    "issuer": "Iguana dog-ops Issuing CA",
+    "nameConstraint": "iguana.internal",
     "gatewaySecrets": ["kibana-tls", "elasticsearch-tls"],
     "inCluster": "Istio mTLS STRICT in the elastic namespace; ECK HTTP TLS disabled",
     "gatewaySecretNamespace": "aks-istio-ingress"

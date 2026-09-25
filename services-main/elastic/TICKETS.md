@@ -27,7 +27,7 @@ flowchart LR
 
 ### 0 — Design decisions and approvals
 Resolve the *Open decisions* in `README.md`: tenant isolation, remote Beats delivery,
-retention, Azure metrics access. **Confirm the issuing CA for `iguana.internal`**, and update the ticket text (it still says dog-ops CA / `snail.internal`).
+retention, Azure metrics access. Correct the ticket text: `snail.internal` → `iguana.internal` throughout.
 ~~TLS model~~ (Istio) · ~~StorageClass~~ · ~~hostnames~~ decided.
 **Start the long-lead items here:** license procurement (ticket 9), cert request (ticket 3),
 firewall change request (ticket 6).
@@ -48,10 +48,9 @@ Install CRDs and operator (first half of `deploy.sh`).
 **Done when:** `elastic-operator` Running in `elastic-system`; operator config shows the Gov ACR as `container-registry`.
 
 ### 3 — Certificates and DNS
-Request `kibana.iguana.internal` and `elasticsearch.iguana.internal` from the CA that covers `iguana.internal`
-(confirm which — not the dog-ops Issuing CA, see README).
+Request `kibana.iguana.internal` and `elasticsearch.iguana.internal` from the **Iguana dog-ops Issuing CA**.
 Create `kibana-tls` and `elasticsearch-tls` in `aks-istio-ingress`. A records for both → aks-1 internal gateway IP.
-**Blocked by:** 0 (issuing CA for `iguana.internal` confirmed)
+**Blocked by:** nothing — can start now
 **Done when:** both secrets exist; SANs verified with `openssl x509 -ext subjectAltName`; both names resolve from aks-1, atl-aks, and gl-aks.
 
 ### 4 — Elasticsearch
@@ -76,7 +75,7 @@ Beat CRs with `elasticsearchRef` (same cluster). Kubernetes module; Heartbeat mo
 **Done when:** `metricbeat-*` and `heartbeat-*` data from aks-1 visible in Kibana Discover.
 
 ### 8 — Metricbeat and Heartbeat on atl-aks and gl-aks
-Per-cluster API key (write-only to Beat indices), Iguana CA trust in the Beat pods, output to `elasticsearch.iguana.internal:443`.
+Per-cluster API key (write-only to Beat indices), Iguana root + dog-ops issuing CA trust in the Beat pods, output to `elasticsearch.iguana.internal:443`.
 **Blocked by:** 5, 6
 **Done when:** data from both spokes visible in Kibana, tagged with its source cluster.
 

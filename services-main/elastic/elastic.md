@@ -43,8 +43,8 @@ kubectl -n aks-istio-ingress get svc aks-istio-ingressgateway-internal \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}{"\n"}'     # A records → this IP
 ```
 
-Both certs are for `iguana.internal` — request them from the CA that covers that domain, not the
-dog-ops Issuing CA (constrained to `snail.internal`). DNS records go in the `iguana.internal` zone.
+Both certs come from the **Iguana dog-ops Issuing CA**, which is name-constrained to `iguana.internal` —
+a request for any other domain will be refused. DNS records go in the `iguana.internal` zone.
 
 ## Tickets 4 and 5 — Elasticsearch and Kibana
 
