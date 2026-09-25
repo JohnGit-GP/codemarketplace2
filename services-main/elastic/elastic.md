@@ -87,6 +87,24 @@ curl -v --resolve kibana.iguana.internal:443:$IP        https://kibana.iguana.in
 curl -v --resolve elasticsearch.iguana.internal:443:$IP https://elasticsearch.iguana.internal/
 ```
 
+### Retention (ticket 4)
+
+The `_comment` key must be stripped before sending — Elasticsearch rejects unknown top-level fields.
+`port-forward` works under STRICT (it enters the pod over loopback, which the sidecar doesn't
+intercept), and ES serves plain HTTP inside the pod:
+
+```bash
+kubectl -n elastic port-forward svc/elasticsearch-es-http 9200 &
+PW=$(kubectl -n elastic get secret elasticsearch-es-elastic-user -o go-template='{{.data.elastic | base64decode}}')
+jq 'del(._comment)' manifests/es-api/ilm-beats-30d.json |
+  curl -sS -u "elastic:$PW" -H 'Content-Type: application/json' \
+    -X PUT http://localhost:9200/_ilm/policy/beats-30d -d @-
+```
+
+Or paste the policy body into Kibana → Dev Tools once Kibana is up.
+
+The snapshot policy (`slm-nightly.json`) goes on after the `azure-snapshots` repository exists.
+
 ## Ticket 9 — License
 
 ```bash

@@ -27,7 +27,7 @@ flowchart LR
 
 ### 0 — Design decisions and approvals
 Resolve the *Open decisions* in `README.md`: tenant isolation, remote Beats delivery,
-retention, Azure metrics access. Correct the ticket text: `snail.internal` → `iguana.internal` throughout.
+Azure metrics access. ~~Retention~~ (30 days) decided. Correct the ticket text: `snail.internal` → `iguana.internal` throughout.
 ~~TLS model~~ (Istio) · ~~StorageClass~~ · ~~hostnames~~ decided.
 **Start the long-lead items here:** license procurement (ticket 9), cert request (ticket 3),
 firewall change request (ticket 6).
@@ -54,9 +54,10 @@ Create `kibana-tls` and `elasticsearch-tls` in `aks-istio-ingress`. A records fo
 **Done when:** both secrets exist; SANs verified with `openssl x509 -ext subjectAltName`; both names resolve from aks-1, atl-aks, and gl-aks.
 
 ### 4 — Elasticsearch
-Deploy via `deploy.sh`. Configure snapshot repository and ILM retention per ticket 0.
+Deploy via `deploy.sh`. Apply `manifests/es-api/ilm-beats-30d.json` (30-day retention).
+Configure the Azure snapshot repository and apply `manifests/es-api/slm-nightly.json`.
 **Blocked by:** 2
-**Done when:** `kubectl get elasticsearch` HEALTH green; all PVCs Bound; one snapshot succeeds; ILM policy attached.
+**Done when:** `kubectl get elasticsearch` HEALTH green; all PVCs Bound; one snapshot succeeds; `beats-30d` ILM policy exists and is referenced by the Beats in ticket 7.
 
 ### 5 — Kibana and gateway exposure
 Deploy Kibana and apply `manifests/istio.yaml` (Gateway + VirtualServices; no DestinationRules — the
@@ -70,7 +71,8 @@ Firewall / NSG / UDR change: atl-aks and gl-aks egress → aks-1 internal gatewa
 **Done when:** `curl -v https://elasticsearch.iguana.internal` from a pod in each spoke completes the TLS handshake.
 
 ### 7 — Metricbeat and Heartbeat on aks-1
-Beat CRs with `elasticsearchRef` (same cluster). Kubernetes module; Heartbeat monitors for aks-1 TEST services.
+Beat CRs with `elasticsearchRef` (same cluster), `setup.ilm.policy_name: beats-30d`. Kubernetes module;
+Heartbeat monitors for aks-1 TEST services. **Measure daily index growth** and resize disks before ticket 8 if needed.
 **Blocked by:** 5
 **Done when:** `metricbeat-*` and `heartbeat-*` data from aks-1 visible in Kibana Discover.
 

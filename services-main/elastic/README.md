@@ -72,6 +72,8 @@ flowchart LR
 | Monitored clusters | aks-1, atl-aks, gl-aks (then Azure metrics) | ticket |
 | Transport port | 9300 excluded from the Istio sidecar | ECK Istio guidance |
 | mmap | `node.store.allow_mmap: false` — avoids a privileged sysctl init container | locked-down AKS |
+| Retention | **30 days, all data** (Metricbeat, Heartbeat, snapshots). ILM rollover daily, delete 30 days after | confirmed |
+| Sizing | 3 nodes × **256Gi** — expandable online; re-measure after ticket 7 | 30-day estimate |
 | Storage | **`managed-csi-premium-retain`** — Premium SSD, `Retain`, `WaitForFirstConsumer` (`manifests/storageclass.yaml`). Kibana needs no storage. | confirmed; every built-in disk class on aks-1 is `Delete` |
 
 ## Environment facts
@@ -107,6 +109,9 @@ flowchart LR
 - **CRDs are too large for client-side apply.** Use `kubectl apply --server-side`.
 - **Never put tarballs in a directory Helm or kubectl will read as manifests.** Cache lives in `cache/`.
 - **Credentials never on a kubectl command line** — they land in container logs.
+- **30 days is the ceiling for SLA reports too.** Anything older is deleted — monthly SLA reports
+  must be produced (or exported) before the data ages out. Snapshots expire at 30 days as well,
+  so they can't be used to reach further back.
 - **Entra group overage:** SAML tokens stop listing groups past ~150 memberships. Configure
   the enterprise app to emit only *groups assigned to the application*.
 
@@ -116,8 +121,7 @@ flowchart LR
    document-level security) or one shared view?
 2. **Remote Beats delivery.** ECK operator is scoped to aks-1. On atl-aks / gl-aks, deploy
    Beats as plain manifests (recommended — no CRDs on every cluster) or install ECK there too?
-3. **Retention period** — sets disk size (`ES_DISK_SIZE`) and the ILM policy.
-4. **Azure metrics** — needs Azure Monitor API egress from aks-1 and a service principal.
+3. **Azure metrics** — needs Azure Monitor API egress from aks-1 and a service principal.
 
 ## File index
 
@@ -134,6 +138,8 @@ flowchart LR
 | `manifests/peerauthentication.yaml` | STRICT mTLS for the `elastic` namespace — required |
 | `manifests/istio.yaml` | Gateway + VirtualServices for Kibana and Elasticsearch |
 | `manifests/storageclass.yaml` | `managed-csi-premium-retain` |
+| `manifests/es-api/ilm-beats-30d.json` | ILM policy: daily rollover, delete at 30 days |
+| `manifests/es-api/slm-nightly.json` | Nightly snapshots, 30-day expiry |
 | `scripts/mirror-images.sh` | `crane` pull/push + upstream manifest fetch — **working** |
 | `scripts/deploy.sh` | Operator (meshed), license, STRICT mTLS, ES, Kibana, Istio exposure |
 | `scripts/check-status.sh` | ECK resource health, PVCs, routing, events |

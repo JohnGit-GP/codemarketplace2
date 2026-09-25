@@ -1,0 +1,8 @@
+{
+  "_comment": "PUT _slm/policy/nightly  — requires the azure-snapshots repository (ticket 4). Expires at 30 days to match data retention.",
+  "schedule": "0 30 1 * * ?",
+  "name": "<nightly-{now/d}>",
+  "repository": "azure-snapshots",
+  "config": { "include_global_state": true },
+  "retention": { "expire_after": "30d", "min_count": 5, "max_count": 35 }
+}
