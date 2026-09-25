@@ -1,113 +1,56 @@
-# Elastic epic — ticket breakdown
+# Elastic epic — tickets
 
-One section per tracking ticket. **Done when** is the closing criterion; **Blocked by** lists
-hard dependencies. Tickets on the same row of the dependency graph can run in parallel.
+Six tracking tickets. **Done when** closes the ticket; **Depends on** is a hard dependency.
 
 ```mermaid
 flowchart LR
-    T0["0 Decisions"] --> T1["1 Stage artifacts"] --> T2["2 aks-1 platform + ECK"]
-    T0 --> T3["3 Certs + DNS"]
-    T0 --> T6["6 Network paths"]
-    T0 --> T9["9 License"]
-    T2 --> T4["4 Elasticsearch"] --> T5["5 Kibana + gateway"]
-    T3 --> T5
-    T5 --> T7["7 Beats on aks-1"]
-    T5 --> T8["8 Beats on atl-aks, gl-aks"]
-    T6 --> T8
-    T5 --> T10["10 SAML"]
-    T9 --> T10 --> T11["11 Group → role mapping"]
-    T7 --> T12["12 Azure metrics"]
-    T7 --> T13["13 Dashboard"]
-    T8 --> T13
-    T11 --> T14["14 Acceptance"]
-    T13 --> T14
+    T1["1 Install ECK"] --> T3["3 Elasticsearch + Kibana"]
+    T2["2 Certs, DNS, network"] --> T3
+    T3 --> T4["4 Beats"]
+    T3 --> T5["5 SSO"]
+    L["License procurement"] --> T5
+    T4 --> T6["6 Dashboard + acceptance"]
+    T5 --> T6
 ```
 
 ---
 
-### 0 — Design decisions and approvals
-Resolve the *Open decisions* in `README.md`: tenant isolation, remote Beats delivery,
-Azure metrics access. ~~Retention~~ (30 days) decided. Correct the ticket text: `snail.internal` → `iguana.internal` throughout.
-~~TLS model~~ (Istio) · ~~StorageClass~~ · ~~hostnames~~ decided.
-**Start the long-lead items here:** license procurement (ticket 9), cert request (ticket 3),
-firewall change request (ticket 6).
-**Done when:** every open decision has a written answer in `README.md`.
+### 1 — Install ECK on aks-1
+Stage images and ECK manifests on the connected side (`mirror-images.sh pull`), transfer, push to
+the Gov ACR (`mirror-images.sh push`). Install CRDs + operator: `./scripts/deploy.sh operator`.
+**Done when:** `elastic-operator` Running in `elastic-system`, pulling from the Gov ACR.
+**Depends on:** —
 
-### 1 — Stage artifacts (connected side)
-`./scripts/mirror-images.sh pull` — images and ECK CRDs/operator manifests into `cache/`.
-Bundle with the `crane` binary, transfer to the air-gapped host.
-**Blocked by:** 0 (version confirmation)
-**Done when:** every image in `images.txt` and every file in `manifests.txt` is in `cache/` on the air-gapped host.
+### 2 — Certificates, DNS, and network paths
+Request `kibana.iguana.internal` and `elasticsearch.iguana.internal` from the Iguana dog-ops Issuing CA;
+create `kibana-tls` and `elasticsearch-tls` in `aks-istio-ingress`. A records for both → aks-1 internal
+gateway IP. Firewall change: atl-aks and gl-aks → aks-1 gateway, TCP 443.
+**Done when:** both names resolve and complete a TLS handshake from aks-1, atl-aks, and gl-aks.
+**Depends on:** — *(mostly other teams — request early)*
 
-### 2 — aks-1 platform prep and ECK operator
-Verify aks-1 environment facts (Istio revision, gateway, mTLS mode, ACR attachment) and
-update `README.md`. Push images to ACR (`mirror-images.sh push`, arch verified amd64).
-Create `managed-csi-premium-retain` after diffing against `managed-csi-premium`.
-Install CRDs and operator (first half of `deploy.sh`).
-**Blocked by:** 1
-**Done when:** `elastic-operator` Running in `elastic-system`; operator config shows the Gov ACR as `container-registry`.
+### 3 — Deploy Elasticsearch and Kibana
+`./scripts/deploy.sh stack` — STRICT mTLS, StorageClass, Elasticsearch, Kibana, Istio gateway.
+Apply the 30-day ILM policy; configure the Azure snapshot repository and nightly snapshots.
+**Done when:** ES green; STRICT verified (a pod without a sidecar cannot reach ES); both URLs work
+through the gateway with the Iguana cert; one snapshot succeeds.
+**Depends on:** 1, 2 (certs needed for the gateway part only)
 
-### 3 — Certificates and DNS
-Request `kibana.iguana.internal` and `elasticsearch.iguana.internal` from the **Iguana dog-ops Issuing CA**.
-Create `kibana-tls` and `elasticsearch-tls` in `aks-istio-ingress`. A records for both → aks-1 internal gateway IP.
-**Blocked by:** nothing — can start now
-**Done when:** both secrets exist; SANs verified with `openssl x509 -ext subjectAltName`; both names resolve from aks-1, atl-aks, and gl-aks.
+### 4 — Deploy Beats to the monitored clusters
+Decide spoke delivery (plain manifests vs ECK). Metricbeat + Heartbeat on aks-1 first — measure
+daily growth and resize disks if needed — then atl-aks and gl-aks (per-cluster write-only API key,
+Iguana CA trust), then the Azure metrics module.
+**Done when:** data from all three clusters and Azure visible in Kibana.
+**Depends on:** 3
 
-### 4 — Elasticsearch
-Deploy via `deploy.sh`. Apply `manifests/es-api/ilm-beats-30d.json` (30-day retention).
-Configure the Azure snapshot repository and apply `manifests/es-api/slm-nightly.json`.
-**Blocked by:** 2
-**Done when:** `kubectl get elasticsearch` HEALTH green; all PVCs Bound; one snapshot succeeds; `beats-30d` ILM policy exists and is referenced by the Beats in ticket 7.
+### 5 — Kibana single sign-on with Entra ID
+Apply the Enterprise license (`LICENSE_FILE=… ./scripts/deploy.sh operator`). Entra enterprise app,
+SAML realm and Kibana provider (reference: `manifests/saml-realm.example.yaml`). Decide the tenant
+isolation model; map Entra group object IDs to roles and spaces. Keep basic login for break-glass.
+**Done when:** a tenant signs in with their Snail account and sees only what their role allows.
+**Depends on:** 3, license procurement
 
-### 5 — Kibana and gateway exposure
-Deploy Kibana and apply `manifests/istio.yaml` (Gateway + VirtualServices; no DestinationRules — the
-mesh handles gateway→pod mTLS). Confirm the gateway selector label on aks-1 first.
-**Blocked by:** 3, 4
-**Done when:** `https://kibana.iguana.internal/api/status` → 200 and `https://elasticsearch.iguana.internal` answers, both through the gateway with the Iguana cert presented; `elastic` user can log in.
-
-### 6 — Network paths from monitored clusters
-Firewall / NSG / UDR change: atl-aks and gl-aks egress → aks-1 internal gateway IP, TCP 443.
-**Blocked by:** 0 (gateway IP known from ticket 3)
-**Done when:** `curl -v https://elasticsearch.iguana.internal` from a pod in each spoke completes the TLS handshake.
-
-### 7 — Metricbeat and Heartbeat on aks-1
-Beat CRs with `elasticsearchRef` (same cluster), `setup.ilm.policy_name: beats-30d`. Kubernetes module;
-Heartbeat monitors for aks-1 TEST services. **Measure daily index growth** and resize disks before ticket 8 if needed.
-**Blocked by:** 5
-**Done when:** `metricbeat-*` and `heartbeat-*` data from aks-1 visible in Kibana Discover.
-
-### 8 — Metricbeat and Heartbeat on atl-aks and gl-aks
-Per-cluster API key (write-only to Beat indices), Iguana root + dog-ops issuing CA trust in the Beat pods, output to `elasticsearch.iguana.internal:443`.
-**Blocked by:** 5, 6
-**Done when:** data from both spokes visible in Kibana, tagged with its source cluster.
-
-### 9 — Enterprise license
-Procure and apply (`LICENSE_FILE=… ./scripts/deploy.sh`).
-**Blocked by:** procurement
-**Done when:** `GET /_license` shows `type: enterprise`, status `active`.
-
-### 10 — Kibana SAML with Entra ID
-Entra enterprise app, federation metadata as a ConfigMap, SAML realm in ES, providers in Kibana.
-Reference: `manifests/saml-realm.example.yaml`.
-**Blocked by:** 5, 9
-**Done when:** a Snail account signs in to Kibana through Entra; basic login still works for break-glass.
-
-### 11 — Entra group → Kibana role mappings
-Roles and Kibana spaces per decision 2; role mappings keyed on group object IDs.
-**Blocked by:** 10
-**Done when:** a member of each mapped group signs in and sees exactly what their role allows — and a non-member is refused.
-
-### 12 — Azure metrics
-Metricbeat `azure` module; service principal and Azure Monitor API reachability per decision 5.
-**Blocked by:** 7, decision 5
-**Done when:** Azure resource metrics visible in Kibana.
-
-### 13 — Baseline uptime and availability dashboard
-Build in Kibana, export saved objects to `dashboards/` as NDJSON so it is versioned and re-importable.
-**Blocked by:** 7, 8
-**Done when:** dashboard shows up/down and availability % per TEST service across all three clusters; export committed.
-
-### 14 — Acceptance
-From a **tenant SSO account**, not an admin: demonstrate AC1 and AC2 to the ticket owner.
-**Blocked by:** 11, 13
-**Done when:** both witnessed; date and witness recorded in `elastic.md`.
+### 6 — Uptime dashboard and acceptance
+Build the baseline uptime/availability dashboard; export saved objects to `dashboards/`.
+Demonstrate AC1 and AC2 to the ticket owner from a **tenant** SSO account.
+**Done when:** both ACs witnessed; date and witness recorded in `elastic.md`.
+**Depends on:** 4, 5

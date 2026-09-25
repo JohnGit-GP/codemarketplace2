@@ -3,35 +3,36 @@
 Runbook for the Elastic Stack via ECK. Ticket numbers refer to `TICKETS.md`.
 Context, decisions, and gotchas are in `README.md` — read that first.
 
-> **Status:** tickets 1, 2, 4 and the Kibana half of 5 are executable as written.
-> Everything else is described but depends on open decisions.
+**How the pieces fit:** the ECK **CRDs** teach Kubernetes the `Elasticsearch`, `Kibana`, and `Beat`
+resource types; the ECK **operator** watches for those resources and builds the pods, services,
+secrets, and volumes behind them. So the operator goes in first, once per cluster (ticket 1), and
+Elasticsearch and Kibana are then just short manifests the operator acts on (ticket 3). Upgrading
+the stack later is a change to `version` in those manifests — the operator rolls it.
 
 ---
 
-## Ticket 1 — Stage artifacts (connected side)
+## Ticket 1 — Install ECK
 
+**Connected side:**
 ```bash
 cd services-main/elastic
 ./scripts/mirror-images.sh pull
-tar -czf elastic-bundle.tar.gz cache/ "$(command -v crane)"
+tar -czf elastic-bundle.tar.gz cache/ crane      # crane = the Linux binary
 scp elastic-bundle.tar.gz <user>@<airgap-host>:~/
 ```
 
-## Ticket 2 — aks-1 platform prep and ECK operator
-
+**Air-gapped side:**
 ```bash
 tar -xzf ~/elastic-bundle.tar.gz -C services-main/elastic/
 cd services-main/elastic
-export ACR_NAME=<gov-acr-name>
-./scripts/mirror-images.sh push             # verifies every image is linux/amd64
-kubectl get storageclass                    # pick one; note its reclaim policy
-kubectl config current-context              # must be aks-1
+export PATH="$PWD:$PATH" ACR_NAME=<acr-name>
+kubectl config current-context                   # must be aks-1
+./scripts/mirror-images.sh push                  # verifies linux/amd64
+./scripts/deploy.sh operator
+kubectl -n elastic-system get pods               # elastic-operator Running
 ```
 
-`deploy.sh` installs the CRDs and operator first; you can stop after the operator is Running
-if you're closing this ticket separately.
-
-## Ticket 3 — Certificates and DNS
+## Ticket 2 — Certificates, DNS, network
 
 ```bash
 for c in kibana elasticsearch; do
@@ -43,56 +44,35 @@ kubectl -n aks-istio-ingress get svc aks-istio-ingressgateway-internal \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}{"\n"}'     # A records → this IP
 ```
 
-Both certs come from the **Iguana dog-ops Issuing CA**, which is name-constrained to `iguana.internal` —
-a request for any other domain will be refused. DNS records go in the `iguana.internal` zone.
+Both certs come from the **Iguana dog-ops Issuing CA**, name-constrained to `iguana.internal`.
+DNS records go in the `iguana.internal` zone. Firewall: atl-aks and gl-aks → that IP, TCP 443.
 
-## Tickets 4 and 5 — Elasticsearch and Kibana
+## Ticket 3 — Elasticsearch and Kibana
 
 ```bash
-export ACR_NAME=<gov-acr-name> STORAGE_CLASS=<class>
-./scripts/deploy.sh
+./scripts/deploy.sh stack
 ./scripts/check-status.sh
 ```
 
-`deploy.sh` waits for ES green (up to 20 minutes on first rollout) and Kibana green.
+Waits for ES green (up to 20 min on first rollout) and Kibana green. If the TLS secrets from
+ticket 2 aren't in place yet it warns and continues — ES and Kibana still come up; the gateway
+starts serving once the secrets exist.
 
-Retrieve the `elastic` password without putting it on a command line anyone else sees:
+**Verify STRICT is enforced** — this must **fail** (the probe pod has no sidecar):
+```bash
+kubectl run mtls-probe --rm -i --restart=Never -n default --image=curlimages/curl -- \
+  curl -sS -m 5 http://elasticsearch-es-http.elastic.svc:9200/ ; echo "exit=$?"
+# JSON back = STRICT NOT in force, ES readable in plaintext. Stop and fix.
+```
 
+**Credentials** — never on a shared command line:
 ```bash
 kubectl -n elastic get secret elasticsearch-es-elastic-user \
   -o go-template='{{.data.elastic | base64decode}}'; echo
 ```
 
-Test Kibana before exposing it:
-
-```bash
-kubectl -n elastic port-forward svc/kibana-kb-http 5601
-# http://localhost:5601 — plain HTTP by design; in-cluster encryption is Istio mTLS
-```
-
-Confirm STRICT is actually enforced — this must **fail**, since the test pod has no sidecar:
-
-```bash
-kubectl run mtls-probe --rm -i --restart=Never -n default --image=curlimages/curl -- \
-  curl -sS -m 5 http://elasticsearch-es-http.elastic.svc:9200/ ; echo "exit=$?"
-# expect a connection reset / non-zero exit. A JSON response means STRICT is NOT in force.
-```
-
-`deploy.sh` finishes by applying the STRICT PeerAuthentication (first, before any workload) and
-the Gateway + VirtualServices. Verify before DNS propagates:
-
-```bash
-IP=<gateway-ip>
-curl -v --resolve kibana.iguana.internal:443:$IP        https://kibana.iguana.internal/api/status
-curl -v --resolve elasticsearch.iguana.internal:443:$IP https://elasticsearch.iguana.internal/
-```
-
-### Retention (ticket 4)
-
-The `_comment` key must be stripped before sending — Elasticsearch rejects unknown top-level fields.
-`port-forward` works under STRICT (it enters the pod over loopback, which the sidecar doesn't
-intercept), and ES serves plain HTTP inside the pod:
-
+**Retention.** `port-forward` works under STRICT (it enters the pod over loopback, which the
+sidecar doesn't intercept). Strip `_comment` — Elasticsearch rejects unknown top-level fields:
 ```bash
 kubectl -n elastic port-forward svc/elasticsearch-es-http 9200 &
 PW=$(kubectl -n elastic get secret elasticsearch-es-elastic-user -o go-template='{{.data.elastic | base64decode}}')
@@ -100,21 +80,22 @@ jq 'del(._comment)' manifests/es-api/ilm-beats-30d.json |
   curl -sS -u "elastic:$PW" -H 'Content-Type: application/json' \
     -X PUT http://localhost:9200/_ilm/policy/beats-30d -d @-
 ```
+Nightly snapshots (`manifests/es-api/slm-nightly.json`) go on after the `azure-snapshots`
+repository exists.
 
-Or paste the policy body into Kibana → Dev Tools once Kibana is up.
-
-The snapshot policy (`slm-nightly.json`) goes on after the `azure-snapshots` repository exists.
-
-## Ticket 9 — License
-
+**Through the gateway**, before DNS propagates:
 ```bash
-LICENSE_FILE=./license.json ./scripts/deploy.sh      # idempotent; adds the eck-license secret
+IP=<gateway-ip>
+curl -v --resolve kibana.iguana.internal:443:$IP        https://kibana.iguana.internal/api/status
+curl -v --resolve elasticsearch.iguana.internal:443:$IP https://elasticsearch.iguana.internal/
 ```
 
-## Tickets 6–8, 10–13
+## Tickets 4–6
 
-Described in `TICKETS.md`. Manifests and procedures will be added here as each ticket's
-open decision is resolved.
+Described in `TICKETS.md`. Procedures are added here as each is worked. For the license (ticket 5):
+```bash
+LICENSE_FILE=./license.json ./scripts/deploy.sh operator    # idempotent
+```
 
 ---
 
@@ -124,9 +105,9 @@ open decision is resolved.
 kubectl -n elastic delete kibana/kibana elasticsearch/elasticsearch
 ```
 
-**PVCs are retained deliberately** — the data survives. Delete them only when you intend to
-destroy the cluster's data. The operator and CRDs are cluster-wide; removing CRDs deletes
-every ECK resource in every namespace, so don't.
+PVCs are kept, and the StorageClass is `Retain`, so the Azure disks survive even if a PVC is
+deleted. Remove them deliberately. Don't delete the ECK CRDs — that deletes every ECK resource
+in every namespace.
 
 ## Acceptance record
 

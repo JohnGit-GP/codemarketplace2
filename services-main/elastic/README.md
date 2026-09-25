@@ -73,7 +73,7 @@ flowchart LR
 | Transport port | 9300 excluded from the Istio sidecar | ECK Istio guidance |
 | mmap | `node.store.allow_mmap: false` — avoids a privileged sysctl init container | locked-down AKS |
 | Retention | **30 days, all data** (Metricbeat, Heartbeat, snapshots). ILM rollover daily, delete 30 days after | confirmed |
-| Sizing | 3 nodes × **256Gi** — expandable online; re-measure after ticket 7 | 30-day estimate |
+| Sizing | 3 nodes × **256Gi** — expandable online; re-measure once aks-1 Beats are running (ticket 4) | 30-day estimate |
 | Storage | **`managed-csi-premium-retain`** — Premium SSD, `Retain`, `WaitForFirstConsumer` (`manifests/storageclass.yaml`). Kibana needs no storage. | confirmed; every built-in disk class on aks-1 is `Delete` |
 
 ## Environment facts
@@ -142,5 +142,5 @@ flowchart LR
 | `manifests/es-api/ilm-beats-30d.json` | ILM policy: daily rollover, delete at 30 days |
 | `manifests/es-api/slm-nightly.json` | Nightly snapshots, 30-day expiry |
 | `scripts/mirror-images.sh` | `crane` pull/push + upstream manifest fetch — **working** |
-| `scripts/deploy.sh` | Operator (meshed), license, STRICT mTLS, ES, Kibana, Istio exposure |
+| `scripts/deploy.sh` | `operator` (CRDs, meshed operator, license) · `stack` (STRICT mTLS, storage, ES, Kibana, gateway) · `all` |
 | `scripts/check-status.sh` | ECK resource health, PVCs, routing, events |
