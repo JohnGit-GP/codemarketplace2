@@ -14,6 +14,7 @@ SVC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"; cd "$SVC_DIR"
 source ./service.conf
 
 : "${ACR_NAME:?Set ACR_NAME (no .azurecr.us)}"
+ACR_NAME="${ACR_NAME,,}"   # login servers are lowercase; mixed case breaks image refs
 REGISTRY="$ACR_NAME.azurecr.us"
 ISTIO_REV="$(jq -r '.istio.revision' service.json)"
 

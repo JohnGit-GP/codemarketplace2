@@ -40,6 +40,7 @@ case "$MODE" in
 
   push)
     : "${ACR_NAME:?Set ACR_NAME}"
+    ACR_NAME="${ACR_NAME,,}"   # login servers are lowercase
     # az acr login shells out to the docker CLI, which is not present on the
     # air-gapped host. --expose-token hands crane a bearer token instead.
     TOKEN="$(az acr login -n "$ACR_NAME" --expose-token --output tsv --query accessToken)"
