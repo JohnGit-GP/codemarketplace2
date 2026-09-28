@@ -90,6 +90,7 @@ flowchart LR
 | Ingress | `aks-istio-ingress` ns, label `istio=aks-istio-ingressgateway-internal` — **✓ verified on aks-1** |
 | **Gateway TLS secrets** | live in **`aks-istio-ingress`**, not the app namespace |
 | Sidecars | native — pods show `Init:1/2` permanently with `READY 1/1`. Normal. |
+| aks-1 capacity | `nodepool1`: **2 nodes**, non-zonal, ~7.8 CPU / ~30Gi allocatable each — ample for 3 × 4Gi ES + Kibana |
 | Spoke → aks-1 network | TCP 443 to the aks-1 internal gateway — **✓ open** |
 | kubectl context | **`cluster3`** is the context name for aks-1 |
 | Registry | Gov ACR (name supplied at runtime via `ACR_NAME`) — **✓ aks-1 pull access confirmed** (prior deployments) |
@@ -115,6 +116,10 @@ flowchart LR
 - **30 days is the ceiling for SLA reports too.** Anything older is deleted — monthly SLA reports
   must be produced (or exported) before the data ages out. Snapshots expire at 30 days as well,
   so they can't be used to reach further back.
+- **Known limitation — 3 ES nodes on 2 VMs.** One VM always hosts two ES pods; if *that* VM fails
+  unplanned, the cluster loses quorum and is down until it returns. Planned drains/upgrades are safe
+  (ECK's PodDisruptionBudget moves pods one at a time). Accepted for TEST; scaling `nodepool1` to 3
+  nodes removes it without redeploying.
 - **Entra group overage:** SAML tokens stop listing groups past ~150 memberships. Configure
   the enterprise app to emit only *groups assigned to the application*.
 
