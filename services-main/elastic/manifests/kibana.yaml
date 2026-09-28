@@ -23,6 +23,10 @@ spec:
     telemetry.allowChangingOptInStatus: false
     newsfeed.enabled: false
     map.includeElasticMapsService: false
+    # Stop Fleet polling the online Elastic Package Registry (epr.elastic.co) — without this
+    # it logs an ERROR every minute. Bundled packages (e.g. synthetics) still install offline.
+    # Verified present in Kibana v9.5.4 (fleet/server/config.ts).
+    xpack.fleet.isAirGapped: true
     # SAML provider added in ticket 5.
   podTemplate:
     metadata:
