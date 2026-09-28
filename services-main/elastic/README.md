@@ -90,7 +90,7 @@ flowchart LR
 | Ingress | `aks-istio-ingress` ns, label `istio=aks-istio-ingressgateway-internal` — **✓ verified on aks-1** |
 | **Gateway TLS secrets** | live in **`aks-istio-ingress`**, not the app namespace |
 | Sidecars | native — pods show `Init:1/2` permanently with `READY 1/1`. Normal. |
-| aks-1 capacity | `nodepool1`: **2 nodes**, non-zonal, ~7.8 CPU / ~30Gi allocatable each — ample for 3 × 4Gi ES + Kibana |
+| aks-1 capacity | `nodepool1`: non-zonal, ~7.8 CPU / ~30Gi allocatable each; **autoscaler 2→3 (max 3)**. CPU/memory are ample, but **pod slots are the limit** — both nodes hit max pods during the STRICT test and forced a scale-up to 3. Size ticket 6 (Beats) against pod slots |
 | Spoke → aks-1 network | TCP 443 to the aks-1 internal gateway — **✓ open** |
 | kubectl context | **`cluster3`** is the context name for aks-1 |
 | Registry | Gov ACR (name supplied at runtime via `ACR_NAME`) — **✓ aks-1 pull access confirmed** (prior deployments) |
