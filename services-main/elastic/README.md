@@ -105,6 +105,11 @@ flowchart LR
   need to: in-cluster encryption is mesh mTLS, and the Iguana certs live only at the gateway.
 - **Anything connecting through the gateway must trust the Iguana chain** — Beat pods on the spokes
   and tenant workstations for Kibana.
+- **Spoke Beats must put `:443` in the host URL.** Beats default to port 9200 when the URL has none,
+  so `https://elasticsearch.iguana.internal` silently becomes `:9200` and times out. Use
+  `hosts: ["https://elasticsearch.iguana.internal:443"]`. Port 9200 is never exposed off-cluster.
+- **Beats on aks-1 must not use `hostNetwork: true`** (ECK's Metricbeat example does). Host-network
+  pods get no sidecar, so STRICT rejects their plaintext writes to 9200. Keep them on the pod network.
 - **Never deploy ES/Kibana without the STRICT PeerAuthentication.** Their HTTP TLS is off; STRICT is
   the only thing stopping plaintext reads from a pod without a sidecar. `deploy.sh` applies it first.
 - **The operator's webhook port (9443) must bypass its sidecar.** The API server isn't in the mesh;
