@@ -24,7 +24,7 @@ the Gov ACR (`mirror-images.sh push`). Install CRDs + operator: `./scripts/deplo
 ### 2 — Certificates, DNS, and network paths
 Request `kibana.iguana.internal` and `elasticsearch.iguana.internal` from the Iguana dog-ops Issuing CA;
 create `kibana-tls` and `elasticsearch-tls` in `aks-istio-ingress`. A records for both → aks-1 internal
-gateway IP. Firewall change: atl-aks and gl-aks → aks-1 gateway, TCP 443.
+gateway IP. Firewall change: atl-aks and gl-aks → aks-1 gateway, TCP 443 — **✓ open**.
 **Done when:** both names resolve and complete a TLS handshake from aks-1, atl-aks, and gl-aks.
 **Depends on:** — *(mostly other teams — request early)*
 

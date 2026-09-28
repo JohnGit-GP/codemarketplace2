@@ -90,6 +90,7 @@ flowchart LR
 | Ingress | `aks-istio-ingress` ns, label `istio=aks-istio-ingressgateway-internal` — **✓ verified on aks-1** |
 | **Gateway TLS secrets** | live in **`aks-istio-ingress`**, not the app namespace |
 | Sidecars | native — pods show `Init:1/2` permanently with `READY 1/1`. Normal. |
+| Spoke → aks-1 network | TCP 443 to the aks-1 internal gateway — **✓ open** |
 | kubectl context | **`cluster3`** is the context name for aks-1 |
 | Registry | Gov ACR (name supplied at runtime via `ACR_NAME`) — **✓ aks-1 pull access confirmed** (prior deployments) |
 | Image transfer | `docker pull --platform linux/amd64` + `docker save` → tar → `docker load` + push |
