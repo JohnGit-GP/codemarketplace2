@@ -26,7 +26,7 @@ scp elastic-bundle.tar.gz <user>@<airgap-host>:~/
 tar -xzf ~/elastic-bundle.tar.gz -C services-main/elastic/
 cd services-main/elastic
 export ACR_NAME=<acr-name>
-kubectl config current-context                   # must be aks-1
+kubectl config current-context                   # cluster3 (= aks-1)
 ./scripts/mirror-images.sh push                  # load, arch-check, tag, push
 ./scripts/deploy.sh operator
 kubectl -n elastic-system get pods               # elastic-operator Running
