@@ -68,7 +68,9 @@ install_operator() {
 }
 
 install_stack() {
-  echo "── Preflight: operator present ──"
+  echo "── Preflight ──"
+  command -v envsubst >/dev/null \
+    || { echo "envsubst not found — install the gettext package" >&2; exit 1; }
   kubectl get crd elasticsearches.elasticsearch.k8s.elastic.co >/dev/null 2>&1 \
     || { echo "ECK CRDs not installed — run: ./scripts/deploy.sh operator" >&2; exit 1; }
   kubectl -n "$OPERATOR_NAMESPACE" rollout status statefulset/elastic-operator --timeout=2m >/dev/null \
@@ -97,11 +99,18 @@ install_stack() {
     "kibana/$KIBANA_NAME" --timeout=10m
 
   echo "── Istio exposure ──"
+  # The internal gateway is shared with other services. Don't hand it a Gateway whose
+  # certificates don't exist yet — apply only once both secrets are present, then re-run.
+  local missing=()
   for s in kibana-tls elasticsearch-tls; do
-    kubectl -n aks-istio-ingress get secret "$s" >/dev/null 2>&1 \
-      || echo "  ⚠ secret $s missing in aks-istio-ingress — gateway will fail TLS for that host (ticket 2)"
+    kubectl -n aks-istio-ingress get secret "$s" >/dev/null 2>&1 || missing+=("$s")
   done
-  render manifests/istio.yaml | kubectl apply -f -
+  if (( ${#missing[@]} )); then
+    echo "  skipped — missing in aks-istio-ingress: ${missing[*]}"
+    echo "  create the TLS secrets (ticket 4), then re-run: ./scripts/deploy.sh stack"
+  else
+    render manifests/istio.yaml | kubectl apply -f -
+  fi
 
   echo "✓ Elasticsearch + Kibana deployed to $CLUSTER namespace=$NAMESPACE"
 }

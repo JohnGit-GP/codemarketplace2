@@ -54,9 +54,10 @@ DNS records go in the `iguana.internal` zone. Firewall: atl-aks and gl-aks → t
 ./scripts/check-status.sh
 ```
 
-Waits for ES green (up to 20 min on first rollout) and Kibana green. If the TLS secrets from
-ticket 2 aren't in place yet it warns and continues — ES and Kibana still come up; the gateway
-starts serving once the secrets exist.
+Waits for ES green (up to 20 min on first rollout) and Kibana green. If the TLS secrets aren't
+in place yet it **skips the Istio Gateway** — the internal gateway is shared, so it never gets a
+Gateway pointing at certificates that don't exist. Create the secrets, then re-run
+`./scripts/deploy.sh stack`; every step is idempotent and the gateway is applied on that run.
 
 **Verify STRICT is enforced** — this must **fail** (the probe pod has no sidecar):
 ```bash
