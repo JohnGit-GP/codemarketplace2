@@ -2,9 +2,8 @@
 # which destroys the Azure disk the moment its PVC is deleted. SLA/Cyber data should
 # survive a mistaken PVC delete or scale-down, so ES gets its own class.
 #
-# Mirrors the built-in managed-csi-premium. Before first apply, diff against:
-#   kubectl get storageclass managed-csi-premium -o yaml
-# and copy any extra parameters across.
+# Mirrors the built-in managed-csi-premium — parameters verified identical on aks-1
+# ({"skuname":"Premium_LRS"}). Re-check if AKS ever changes the built-in class.
 #
 # Released disks are NOT cleaned up automatically — delete them in Azure deliberately.
 apiVersion: storage.k8s.io/v1
