@@ -125,6 +125,11 @@ Users and groups: assign `elk_admins` plus whoever should read. Download **Feder
 XML** (SAML Certificates section). Note the `elk_admins` **Object ID**. Elasticsearch never
 calls Entra — the metadata is a file — but users' browsers must reach `login.microsoftonline.us`.
 
+Preview any `stack` run first — read-only, prints only what would change:
+```bash
+SAML_METADATA_FILE=/path/to/Kibana.xml ./scripts/deploy.sh diff
+```
+
 **3. Turn SAML on** (rolling restart of ES, then Kibana):
 ```bash
 SAML_METADATA_FILE=/path/to/Kibana.xml ./scripts/deploy.sh stack

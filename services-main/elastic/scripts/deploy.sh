@@ -5,6 +5,7 @@
 #   ./scripts/deploy.sh stack      STRICT mTLS, storage, Elasticsearch, Kibana,
 #                                  Istio gateway exposure                          — ticket 3
 #   ./scripts/deploy.sh all        both, in order (default)
+#   ./scripts/deploy.sh diff       read-only: show what `stack` would change (kubectl diff)
 #
 # TLS model: Elasticsearch serves ECK-managed HTTPS and runs outside the mesh (SAML needs
 # HTTP TLS on). Kibana is in the mesh under STRICT mTLS and serves plain HTTP in the pod.
@@ -85,6 +86,41 @@ install_operator() {
   echo "✓ ECK operator ready in $OPERATOR_NAMESPACE"
 }
 
+# Sets SAML_IDP_ENTITY_ID / SAML_ENABLED. The entity ID is read from the stored metadata, so
+# re-runs need no extra input; `diff` reads SAML_METADATA_FILE directly instead (no writes).
+saml_inputs() {
+  local src
+  if [[ "$STEP" == diff && -n "${SAML_METADATA_FILE:-}" ]]; then
+    src="$(cat "$SAML_METADATA_FILE")"
+  else
+    src="$(kubectl -n "$NAMESPACE" get configmap entra-saml-metadata \
+      -o jsonpath='{.data.entra-metadata\.xml}' 2>/dev/null || true)"
+  fi
+  SAML_IDP_ENTITY_ID="$(grep -o 'entityID="[^"]*"' <<<"$src" | head -1 | cut -d'"' -f2 || true)"
+  if [[ -n "$SAML_IDP_ENTITY_ID" ]]; then
+    SAML_ENABLED=true;  echo "  SAML enabled — IdP $SAML_IDP_ENTITY_ID"
+  else
+    SAML_ENABLED=false; echo "  SAML disabled — no entra-saml-metadata ConfigMap (set SAML_METADATA_FILE)"
+  fi
+}
+
+# Read-only preview of `stack`. Unchanged objects print nothing. A diff under spec.nodeSets or
+# spec.http means an Elasticsearch rolling restart; under spec.config/podTemplate on Kibana, a
+# Kibana restart (seconds of UI downtime with one replica).
+show_diff() {
+  command -v envsubst >/dev/null || { echo "envsubst not found — install the gettext package" >&2; exit 1; }
+  saml_inputs
+  if [[ -n "${SAML_METADATA_FILE:-}" ]]; then
+    echo "── entra-saml-metadata ConfigMap ──"
+    kubectl -n "$NAMESPACE" create configmap entra-saml-metadata \
+      --from-file=entra-metadata.xml="$SAML_METADATA_FILE" --dry-run=client -o yaml | kubectl diff -f - || true
+  fi
+  for f in peerauthentication elasticsearch kibana istio; do
+    echo "── $f ──"
+    render "manifests/$f.yaml" | kubectl diff -f - || true
+  done
+}
+
 install_stack() {
   echo "── Preflight ──"
   command -v envsubst >/dev/null \
@@ -112,15 +148,7 @@ install_stack() {
     kubectl -n "$NAMESPACE" create configmap entra-saml-metadata \
       --from-file=entra-metadata.xml="$SAML_METADATA_FILE" --dry-run=client -o yaml | kubectl apply -f -
   fi
-  # The IdP entity ID is read from the stored metadata, so re-runs need no extra input.
-  SAML_IDP_ENTITY_ID="$(kubectl -n "$NAMESPACE" get configmap entra-saml-metadata \
-    -o jsonpath='{.data.entra-metadata\.xml}' 2>/dev/null \
-    | grep -o 'entityID="[^"]*"' | head -1 | cut -d'"' -f2 || true)"
-  if [[ -n "$SAML_IDP_ENTITY_ID" ]]; then
-    SAML_ENABLED=true;  echo "  enabled — IdP $SAML_IDP_ENTITY_ID"
-  else
-    SAML_ENABLED=false; echo "  disabled — no entra-saml-metadata ConfigMap (set SAML_METADATA_FILE)"
-  fi
+  saml_inputs
 
   echo "── Elasticsearch ──"
   render manifests/elasticsearch.yaml | kubectl apply -f -
@@ -158,6 +186,7 @@ install_stack() {
 case "$STEP" in
   operator) install_operator ;;
   stack)    install_stack ;;
+  diff)     show_diff ;;
   all)      install_operator; install_stack ;;
-  *) echo "usage: $0 [operator|stack|all]" >&2; exit 1 ;;
+  *) echo "usage: $0 [operator|stack|all|diff]" >&2; exit 1 ;;
 esac
