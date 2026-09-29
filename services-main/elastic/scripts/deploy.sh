@@ -6,12 +6,14 @@
 #                                  Istio gateway exposure                          — ticket 3
 #   ./scripts/deploy.sh all        both, in order (default)
 #
-# TLS model: ECK HTTP TLS is OFF. Istio mTLS (STRICT in the elastic namespace) encrypts
-# everything in the mesh; the internal gateway terminates TLS at the edge. The operator must
-# therefore be in the mesh too, or STRICT would lock it out of Elasticsearch.
+# TLS model: Elasticsearch serves ECK-managed HTTPS and runs outside the mesh (SAML needs
+# HTTP TLS on). Kibana is in the mesh under STRICT mTLS and serves plain HTTP in the pod.
+# The internal gateway terminates the Iguana certs and re-encrypts to ES with ECK's CA.
 #
 # Required env: ACR_NAME            (operator step)
-# Optional env: LICENSE_FILE        Elastic Enterprise license JSON — required before SAML
+# Optional env: LICENSE_FILE        Elastic Enterprise license JSON (ticket 7)
+#               SAML_METADATA_FILE  Entra federation metadata XML — creates/updates the
+#                                   entra-saml-metadata ConfigMap, which turns SAML on (ticket 7)
 set -euo pipefail
 
 SVC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"; cd "$SVC_DIR"
@@ -23,8 +25,24 @@ ISTIO_REV="$(jq -r '.istio.revision' service.json)"
 
 render() {
   export ES_NAME KIBANA_NAME NAMESPACE STACK_VERSION ES_NODE_COUNT ES_DISK_SIZE ES_MEMORY \
-         STORAGE_CLASS KIBANA_HOST ES_HOST ISTIO_INGRESS_SELECTOR
-  envsubst '${ES_NAME} ${KIBANA_NAME} ${NAMESPACE} ${STACK_VERSION} ${ES_NODE_COUNT} ${ES_DISK_SIZE} ${ES_MEMORY} ${STORAGE_CLASS} ${KIBANA_HOST} ${ES_HOST} ${ISTIO_INGRESS_SELECTOR}' < "$1"
+         STORAGE_CLASS KIBANA_HOST ES_HOST ISTIO_INGRESS_SELECTOR SAML_ENABLED SAML_IDP_ENTITY_ID
+  envsubst '${ES_NAME} ${KIBANA_NAME} ${NAMESPACE} ${STACK_VERSION} ${ES_NODE_COUNT} ${ES_DISK_SIZE} ${ES_MEMORY} ${STORAGE_CLASS} ${KIBANA_HOST} ${ES_HOST} ${ISTIO_INGRESS_SELECTOR} ${SAML_ENABLED} ${SAML_IDP_ENTITY_ID}' < "$1"
+}
+
+# Wait until ECK has acted on the latest spec (not just the old, still-green state) and the
+# resource is green. A spec change to ES triggers a rolling restart, one node at a time.
+wait_ready() {
+  local kind="$1" name="$2" timeout_s="$3" gen og phase health
+  gen="$(kubectl -n "$NAMESPACE" get "$kind/$name" -o jsonpath='{.metadata.generation}')"
+  for (( t = 0; t < timeout_s; t += 10 )); do
+    IFS='|' read -r og health phase < <(kubectl -n "$NAMESPACE" get "$kind/$name" \
+      -o jsonpath='{.status.observedGeneration}|{.status.health}|{.status.phase}{"\n"}')
+    if [[ "${og:-$gen}" == "$gen" && "$health" == green && "${phase:-Ready}" == Ready ]]; then
+      echo "  $kind/$name green"; return 0
+    fi
+    sleep 10
+  done
+  echo "$kind/$name not green after ${timeout_s}s — run ./scripts/check-status.sh" >&2; exit 1
 }
 
 install_operator() {
@@ -79,7 +97,7 @@ install_stack() {
   echo "── Namespace + STRICT mTLS ──"
   kubectl get ns "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE"
   kubectl label namespace "$NAMESPACE" "istio.io/rev=$ISTIO_REV" --overwrite
-  # Before any workload: ES and Kibana serve plain HTTP, so STRICT must already be in force.
+  # Before any workload: Kibana serves plain HTTP in its pod, so STRICT must already be in force.
   render manifests/peerauthentication.yaml | kubectl apply -f -
 
   echo "── StorageClass ──"
@@ -87,16 +105,31 @@ install_stack() {
   kubectl get storageclass "$STORAGE_CLASS" >/dev/null \
     || { echo "StorageClass $STORAGE_CLASS not found" >&2; exit 1; }
 
+  echo "── SAML (Entra ID) ──"
+  if [[ -n "${SAML_METADATA_FILE:-}" ]]; then
+    grep -q 'entityID=' "$SAML_METADATA_FILE" \
+      || { echo "$SAML_METADATA_FILE is not SAML federation metadata" >&2; exit 1; }
+    kubectl -n "$NAMESPACE" create configmap entra-saml-metadata \
+      --from-file=entra-metadata.xml="$SAML_METADATA_FILE" --dry-run=client -o yaml | kubectl apply -f -
+  fi
+  # The IdP entity ID is read from the stored metadata, so re-runs need no extra input.
+  SAML_IDP_ENTITY_ID="$(kubectl -n "$NAMESPACE" get configmap entra-saml-metadata \
+    -o jsonpath='{.data.entra-metadata\.xml}' 2>/dev/null \
+    | grep -o 'entityID="[^"]*"' | head -1 | cut -d'"' -f2 || true)"
+  if [[ -n "$SAML_IDP_ENTITY_ID" ]]; then
+    SAML_ENABLED=true;  echo "  enabled — IdP $SAML_IDP_ENTITY_ID"
+  else
+    SAML_ENABLED=false; echo "  disabled — no entra-saml-metadata ConfigMap (set SAML_METADATA_FILE)"
+  fi
+
   echo "── Elasticsearch ──"
   render manifests/elasticsearch.yaml | kubectl apply -f -
   # StatefulSet with PVCs: first rollout and rolling restarts are slow.
-  kubectl -n "$NAMESPACE" wait --for=jsonpath='{.status.health}'=green \
-    "elasticsearch/$ES_NAME" --timeout=20m
+  wait_ready elasticsearch "$ES_NAME" 1800
 
   echo "── Kibana ──"
   render manifests/kibana.yaml | kubectl apply -f -
-  kubectl -n "$NAMESPACE" wait --for=jsonpath='{.status.health}'=green \
-    "kibana/$KIBANA_NAME" --timeout=10m
+  wait_ready kibana "$KIBANA_NAME" 600
 
   echo "── Istio exposure ──"
   # The internal gateway is shared with other services. Don't hand it a Gateway whose
@@ -109,6 +142,13 @@ install_stack() {
     echo "  skipped — missing in aks-istio-ingress: ${missing[*]}"
     echo "  create the TLS secrets (ticket 4), then re-run: ./scripts/deploy.sh stack"
   else
+    # The gateway re-encrypts to ES and verifies it against ECK's HTTP CA. ECK rotates that
+    # CA (1-year validity), so refresh the copy on every run.
+    local ca
+    ca="$(kubectl -n "$NAMESPACE" get secret "${ES_NAME}-es-http-certs-public" -o jsonpath='{.data.ca\.crt}')"
+    [[ -n "$ca" ]] || { echo "ECK HTTP CA not found (${ES_NAME}-es-http-certs-public)" >&2; exit 1; }
+    kubectl -n aks-istio-ingress create secret generic elasticsearch-es-ca \
+      --from-literal=ca.crt="$(base64 -d <<<"$ca")" --dry-run=client -o yaml | kubectl apply -f -
     render manifests/istio.yaml | kubectl apply -f -
   fi
 

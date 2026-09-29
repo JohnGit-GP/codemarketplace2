@@ -1,5 +1,5 @@
 # Rendered by scripts/deploy.sh with envsubst. Variables: ES_NAME NAMESPACE STACK_VERSION
-# ES_NODE_COUNT ES_DISK_SIZE ES_MEMORY STORAGE_CLASS
+# ES_NODE_COUNT ES_DISK_SIZE ES_MEMORY STORAGE_CLASS KIBANA_HOST SAML_ENABLED SAML_IDP_ENTITY_ID
 apiVersion: elasticsearch.k8s.elastic.co/v1
 kind: Elasticsearch
 metadata:
@@ -9,11 +9,12 @@ spec:
   version: ${STACK_VERSION}
   http:
     tls:
+      # ECK-managed HTTPS on 9200. Required: SAML needs the token service, and Elasticsearch
+      # refuses to start with the token service on and HTTP TLS off (TokenSSLBootstrapCheck).
+      # ECK issues and rotates this cert; the gateway trusts its CA via manifests/istio.yaml.
       selfSignedCertificate:
-        # HTTP (9200) is plain inside the pod; Istio mTLS (STRICT, manifests/peerauthentication.yaml)
-        # encrypts every hop in the mesh and the gateway terminates TLS at the edge.
-        # Do NOT deploy this without the STRICT PeerAuthentication in place.
-        disabled: true
+        subjectAltNames:
+          - dns: ${ES_NAME}-es-http.${NAMESPACE}.svc.cluster.local
   nodeSets:
     - name: default
       count: ${ES_NODE_COUNT}
@@ -23,15 +24,29 @@ spec:
         # Air-gapped: ES otherwise polls geoip.elastic.co for GeoIP databases and logs
         # a failure on every attempt. Nothing here uses GeoIP enrichment.
         ingest.geoip.downloader.enabled: false
-        # SAML realm is added in ticket 5 — see manifests/saml-realm.example.yaml.
+        # SAML with Entra ID (ticket 7). Needs a Platinum/Enterprise or trial license.
+        # deploy.sh sets SAML_ENABLED=true once the entra-saml-metadata ConfigMap exists;
+        # a disabled realm is skipped at startup, so the missing metadata file is harmless.
+        xpack.security.authc.token.enabled: true
+        xpack.security.authc.realms.saml.saml1:
+          enabled: ${SAML_ENABLED}
+          order: 2
+          idp.metadata.path: saml/entra-metadata.xml
+          idp.entity_id: "${SAML_IDP_ENTITY_ID}"
+          sp.entity_id: "https://${KIBANA_HOST}"
+          sp.acs: "https://${KIBANA_HOST}/api/security/saml/callback"
+          sp.logout: "https://${KIBANA_HOST}/logout"
+          attributes.principal: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
+          attributes.groups: "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
+          attributes.name: "http://schemas.microsoft.com/identity/claims/displayname"
+          attributes.mail: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
       podTemplate:
         metadata:
-          annotations:
-            # Transport (9300) is ECK-TLS'd and cannot be switched off; letting the
-            # sidecar proxy it double-encrypts inter-node traffic and breaks the cluster.
-            traffic.sidecar.istio.io/includeInboundPorts: "*"
-            traffic.sidecar.istio.io/excludeInboundPorts: "9300"
-            traffic.sidecar.istio.io/excludeOutboundPorts: "9300"
+          labels:
+            # ES is outside the mesh: it terminates its own TLS on 9200, and 9300 is always
+            # ECK-TLS'd. Meshed clients (Kibana, operator, Beats) reach it without mTLS
+            # automatically; STRICT still covers Kibana.
+            sidecar.istio.io/inject: "false"
         spec:
           automountServiceAccountToken: true
           containers:
@@ -42,6 +57,15 @@ spec:
                   cpu: "1"
                 limits:
                   memory: ${ES_MEMORY}
+              volumeMounts:
+                - name: entra-saml-metadata
+                  mountPath: /usr/share/elasticsearch/config/saml
+                  readOnly: true
+          volumes:
+            - name: entra-saml-metadata
+              configMap:
+                name: entra-saml-metadata
+                optional: true   # absent until ticket 7; the realm is disabled until then
       volumeClaimTemplates:
         - metadata:
             name: elasticsearch-data   # name is fixed by ECK

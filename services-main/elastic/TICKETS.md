@@ -44,7 +44,7 @@ Iguana CA trust), then the Azure metrics module.
 
 ### 5 — Kibana single sign-on with Entra ID
 Apply the Enterprise license (`LICENSE_FILE=… ./scripts/deploy.sh operator`). Entra enterprise app,
-SAML realm and Kibana provider (reference: `manifests/saml-realm.example.yaml`). Decide the tenant
+SAML realm and Kibana provider (`SAML_METADATA_FILE=… ./scripts/deploy.sh stack`, see `elastic.md`). Decide the tenant
 isolation model; map Entra group object IDs to roles and spaces. Keep basic login for break-glass.
 **Done when:** a tenant signs in with their Snail account and sees only what their role allows.
 **Depends on:** 3, license procurement

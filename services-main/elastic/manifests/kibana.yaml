@@ -1,5 +1,5 @@
 # Rendered by scripts/deploy.sh with envsubst. Variables: KIBANA_NAME NAMESPACE STACK_VERSION
-# ES_NAME KIBANA_HOST
+# ES_NAME KIBANA_HOST SAML_ENABLED
 apiVersion: kibana.k8s.elastic.co/v1
 kind: Kibana
 metadata:
@@ -27,7 +27,17 @@ spec:
     # it logs an ERROR every minute. Bundled packages (e.g. synthetics) still install offline.
     # Verified present in Kibana v9.5.4 (fleet/server/config.ts).
     xpack.fleet.isAirGapped: true
-    # SAML provider added in ticket 5.
+    # TLS is terminated at the gateway, so Kibana can't infer that the browser is on HTTPS.
+    xpack.security.secureCookies: true
+    # Entra ID SSO (ticket 7). Basic stays on as break-glass for the elastic user.
+    xpack.security.authc.providers:
+      saml.saml1:
+        enabled: ${SAML_ENABLED}
+        order: 0
+        realm: saml1
+        description: "Log in with Entra ID"
+      basic.basic1:
+        order: 1
   podTemplate:
     metadata:
       annotations:

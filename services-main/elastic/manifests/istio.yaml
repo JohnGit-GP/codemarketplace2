@@ -2,8 +2,11 @@
 # ISTIO_INGRESS_SELECTOR
 #
 # The gateway terminates TLS with the certs in aks-istio-ingress (credentialName resolves in
-# the gateway workload's namespace, not this one). Gateway → pod is Istio mTLS automatically;
-# no DestinationRule is needed because ES and Kibana serve plain HTTP behind their sidecars.
+# the gateway workload's namespace, not this one).
+#   Gateway → Kibana: Istio mTLS automatically (Kibana is meshed, plain HTTP in the pod).
+#   Gateway → ES:     ES is outside the mesh and serves ECK HTTPS, so the gateway re-encrypts
+#                     and verifies ES against ECK's CA (secret elasticsearch-es-ca, copied by
+#                     deploy.sh). See the DestinationRule at the end.
 apiVersion: networking.istio.io/v1
 kind: Gateway
 metadata:
@@ -50,3 +53,20 @@ spec:
         - destination:
             host: ${ES_NAME}-es-http.${NAMESPACE}.svc.cluster.local       # ECK service name
             port: { number: 9200 }
+---
+# Exported to the gateway's namespace only. Meshed clients in this namespace (Kibana, Beats)
+# already speak TLS to ES themselves; this rule would wrap them in a second TLS layer.
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: elasticsearch-https
+  namespace: ${NAMESPACE}
+spec:
+  host: ${ES_NAME}-es-http.${NAMESPACE}.svc.cluster.local
+  exportTo: ["aks-istio-ingress"]
+  trafficPolicy:
+    tls:
+      mode: SIMPLE
+      credentialName: elasticsearch-es-ca          # ca.crt only; in aks-istio-ingress
+      sni: ${ES_NAME}-es-http.${NAMESPACE}.svc
+      subjectAltNames: ["${ES_NAME}-es-http.${NAMESPACE}.svc"]

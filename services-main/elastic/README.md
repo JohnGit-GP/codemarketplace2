@@ -65,12 +65,12 @@ flowchart LR
 | Stack version | **9.5.4** (Elasticsearch, Kibana, Metricbeat, Heartbeat) | latest 9.x release |
 | Namespaces | `elastic` (stack), `elastic-system` (operator) | ECK convention |
 | Hostnames | **`kibana.iguana.internal`**, **`elasticsearch.iguana.internal`** | confirmed by you |
-| TLS model | **Istio.** ECK HTTP TLS disabled; Istio mTLS **STRICT** in `elastic`; operator namespace in the mesh with webhook port 9443 excluded; gateway terminates TLS at the edge | confirmed by you |
+| TLS model | **Mixed.** Elasticsearch: ECK-managed HTTPS, **outside the mesh** (SAML requires ES HTTP TLS). Kibana: in the mesh, Istio mTLS **STRICT**. Gateway terminates the Iguana certs; re-encrypts to ES, verifying ECK's CA | revised for SAML (ticket 7) |
 | Certificates | **Iguana dog-ops Issuing CA** — name-constrained to `iguana.internal`; names follow `<svc>.iguana.internal` | ticket (corrected: ticket text said `snail.internal`) |
 | Kibana auth | SAML via Entra ID + a `basic` provider kept for break-glass | ticket |
 | License | **Elastic Enterprise** — required for SAML | ticket |
 | Monitored clusters | aks-1, atl-aks, gl-aks (then Azure metrics) | ticket |
-| Transport port | 9300 excluded from the Istio sidecar | ECK Istio guidance |
+| Transport port | 9300, ECK TLS (ES pods have no sidecar) | ECK |
 | mmap | `node.store.allow_mmap: false` — avoids a privileged sysctl init container | locked-down AKS |
 | Retention | **30 days, all data** (Metricbeat, Heartbeat, snapshots). ILM rollover daily, delete 30 days after | confirmed |
 | Sizing | 3 nodes × **256Gi** — expandable online; re-measure once aks-1 Beats are running (ticket 4) | 30-day estimate |
@@ -99,19 +99,27 @@ flowchart LR
 
 ## Gotchas carried forward
 
-- **9300 must bypass the sidecar.** Otherwise inter-node transport is encrypted twice and the
-  cluster never forms. The annotations are in `manifests/elasticsearch.yaml`.
-- **The CA can't sign cluster-local names** (name-constrained to `iguana.internal`), and doesn't
-  need to: in-cluster encryption is mesh mTLS, and the Iguana certs live only at the gateway.
+- **SAML forces HTTPS on Elasticsearch.** SAML needs the token service, and ES refuses to start
+  with the token service on and HTTP TLS off (`TokenSSLBootstrapCheck`). ES therefore runs ECK TLS
+  outside the mesh (`sidecar.istio.io/inject: "false"`); meshed clients reach it without mTLS
+  automatically. Don't put ES back in the mesh without re-reading this.
+- **The gateway trusts ES through a copy of ECK's CA** (`elasticsearch-es-ca` in
+  `aks-istio-ingress`). ECK rotates that CA yearly; `deploy.sh stack` refreshes the copy, so re-run
+  it if the ES API through the gateway starts returning 503 with a certificate error.
+- **The Iguana CA can't sign cluster-local names** (name-constrained to `iguana.internal`), and doesn't
+  need to: the Iguana certs live only at the gateway; ECK signs the in-cluster ES cert.
 - **Anything connecting through the gateway must trust the Iguana chain** — Beat pods on the spokes
   and tenant workstations for Kibana.
 - **Spoke Beats must put `:443` in the host URL.** Beats default to port 9200 when the URL has none,
   so `https://elasticsearch.iguana.internal` silently becomes `:9200` and times out. Use
   `hosts: ["https://elasticsearch.iguana.internal:443"]`. Port 9200 is never exposed off-cluster.
-- **Beats on aks-1 must not use `hostNetwork: true`** (ECK's Metricbeat example does). Host-network
-  pods get no sidecar, so STRICT rejects their plaintext writes to 9200. Keep them on the pod network.
-- **Never deploy ES/Kibana without the STRICT PeerAuthentication.** Their HTTP TLS is off; STRICT is
-  the only thing stopping plaintext reads from a pod without a sidecar. `deploy.sh` applies it first.
+- **Never deploy Kibana without the STRICT PeerAuthentication.** Its HTTP TLS is off; STRICT is
+  the only thing stopping plaintext access from a pod without a sidecar. `deploy.sh` applies it first.
+- **SAML stops when the trial ends.** The ECK trial lasts 30 days; without the Enterprise license by
+  then the cluster drops to Basic and only the `elastic` user (basic login) works.
+- **Entra sends group object IDs, not names.** Role mappings match the GUID of `elk_admins`.
+- **Entra's SAML signing cert expires** (3 years by default). When it's renewed, download the new
+  metadata and re-run `SAML_METADATA_FILE=… ./scripts/deploy.sh stack`, or SSO fails.
 - **The operator's webhook port (9443) must bypass its sidecar.** The API server isn't in the mesh;
   without the exclusion every `kubectl apply` of an ECK resource is rejected.
 - **Kibana refuses to start on unknown config keys.** Check every `config:` key against the 9.5 docs.
@@ -149,10 +157,12 @@ flowchart LR
 | `manifests/elasticsearch.yaml` | ES cluster (envsubst template) |
 | `manifests/kibana.yaml` | Kibana (envsubst template) |
 | `manifests/peerauthentication.yaml` | STRICT mTLS for the `elastic` namespace — required |
-| `manifests/istio.yaml` | Gateway + VirtualServices for Kibana and Elasticsearch |
+| `manifests/eck-trial-license.yaml` | 30-day ECK enterprise trial (unlocks SAML) |
+| `manifests/istio.yaml` | Gateway + VirtualServices for Kibana and Elasticsearch; DestinationRule re-encrypting to ES |
 | `manifests/storageclass.yaml` | `managed-csi-premium-retain` |
 | `manifests/es-api/ilm-beats-30d.json` | ILM policy: daily rollover, delete at 30 days |
 | `manifests/es-api/slm-nightly.json` | Nightly snapshots, 30-day expiry |
+| `manifests/es-api/role-mapping-*.json` | SAML role mappings: everyone → `viewer`, `elk_admins` → `superuser` |
 | `scripts/mirror-images.sh` | Docker pull/save + load/tag/push, arch-checked; fetches ECK manifests |
-| `scripts/deploy.sh` | `operator` (CRDs, meshed operator, license) · `stack` (STRICT mTLS, storage, ES, Kibana, gateway) · `all` |
+| `scripts/deploy.sh` | `operator` (CRDs, meshed operator, license) · `stack` (STRICT mTLS, storage, SAML metadata, ES, Kibana, gateway) · `all` |
 | `scripts/check-status.sh` | ECK resource health, PVCs, routing, events |

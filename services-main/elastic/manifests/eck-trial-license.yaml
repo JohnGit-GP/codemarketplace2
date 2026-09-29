@@ -1,0 +1,13 @@
+# ECK enterprise trial (30 days, once per operator install). Unlocks SAML until the full
+# Enterprise license is applied with: LICENSE_FILE=./license.json ./scripts/deploy.sh operator
+# Applying it accepts the Elastic EULA. When the trial ends without a license, the cluster
+# falls back to Basic: SAML stops working, the elastic user (basic login) keeps working.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: eck-trial-license
+  namespace: elastic-system
+  labels:
+    license.k8s.elastic.co/type: enterprise_trial
+  annotations:
+    elastic.co/eula: accepted

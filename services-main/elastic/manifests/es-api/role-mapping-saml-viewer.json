@@ -1,0 +1,6 @@
+{
+  "_comment": "Everyone who signs in through Entra (realm saml1) gets read-only access. Who can sign in is controlled by the Entra enterprise app's user/group assignment.",
+  "enabled": true,
+  "roles": ["viewer"],
+  "rules": { "field": { "realm.name": "saml1" } }
+}

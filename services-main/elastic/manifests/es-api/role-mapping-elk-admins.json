@@ -1,0 +1,9 @@
+{
+  "_comment": "Members of the Entra group elk_admins get full admin. Entra sends group object IDs, not names — ELK_ADMINS_GROUP_ID is substituted at apply time (see elastic.md).",
+  "enabled": true,
+  "roles": ["superuser"],
+  "rules": { "all": [
+    { "field": { "realm.name": "saml1" } },
+    { "field": { "groups": "ELK_ADMINS_GROUP_ID" } }
+  ] }
+}
