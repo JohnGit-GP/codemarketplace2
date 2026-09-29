@@ -103,6 +103,10 @@ flowchart LR
   with the token service on and HTTP TLS off (`TokenSSLBootstrapCheck`). ES therefore runs ECK TLS
   outside the mesh (`sidecar.istio.io/inject: "false"`); meshed clients reach it without mTLS
   automatically. Don't put ES back in the mesh without re-reading this.
+- **Toggling ES HTTP TLS on a running cluster stalls the rolling restart.** The operator switches to
+  HTTPS while the not-yet-restarted nodes still serve HTTP, so it can't clear the first restarted
+  node's shutdown record, and that node never goes Ready (log shows `Starting node shutdown sequence
+  for ML`, no `readiness service up`). Fix: through an old pod, `DELETE _nodes/<node-id>/shutdown`.
 - **The gateway trusts ES through a copy of ECK's CA** (`elasticsearch-es-ca` in
   `aks-istio-ingress`). ECK rotates that CA yearly; `deploy.sh stack` refreshes the copy, so re-run
   it if the ES API through the gateway starts returning 503 with a certificate error.
