@@ -95,3 +95,8 @@ spec:
             resources:
               requests: { cpu: 100m, memory: 200Mi }
               limits: { memory: 400Mi }
+        volumes:
+          # Replaces ECK's default hostPath data volume (root-owned; the non-root Beat can't
+          # write to it). Metricbeat keeps no state worth persisting.
+          - name: beat-data
+            emptyDir: {}

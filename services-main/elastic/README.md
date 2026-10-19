@@ -130,6 +130,9 @@ flowchart LR
   metadata and re-run `SAML_METADATA_FILE=… ./scripts/deploy.sh stack`, or SSO fails.
 - **The operator's webhook port (9443) must bypass its sidecar.** The API server isn't in the mesh;
   without the exclusion every `kubectl apply` of an ECK resource is rejected.
+- **Beats need `beat-data` overridden with `emptyDir`.** ECK's default data volume is a hostPath the
+  kubelet creates root-owned; the non-root Beat exits with `failed to create temporary Beat meta
+  file ... permission denied`. Both Beat manifests override it (no root needed).
 - **Kibana refuses to start on unknown config keys.** Check every `config:` key against the 9.5 docs.
 - **CRDs are too large for client-side apply.** Use `kubectl apply --server-side`.
 - **Never put tarballs in a directory Helm or kubectl will read as manifests.** Cache lives in `cache/`.

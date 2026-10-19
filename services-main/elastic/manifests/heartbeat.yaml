@@ -46,6 +46,10 @@ spec:
               - { name: monitors, mountPath: /usr/share/heartbeat/monitors.d, readOnly: true }
               - { name: ca, mountPath: /usr/share/heartbeat/ca, readOnly: true }
         volumes:
+          # Replaces ECK's default hostPath data volume, which the kubelet creates root-owned —
+          # the non-root Beat then can't write meta.json and exits. emptyDir needs no root.
+          - name: beat-data
+            emptyDir: {}
           - name: monitors
             configMap: { name: heartbeat-monitors }
           - name: ca
