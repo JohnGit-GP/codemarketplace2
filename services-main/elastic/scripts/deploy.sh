@@ -7,6 +7,7 @@
 #   ./scripts/deploy.sh all        both, in order (default)
 #   ./scripts/deploy.sh heartbeat  uptime checks from manifests/heartbeat-monitors.yml — ticket 6
 #                                  (re-run after editing the monitor list; see HEARTBEAT.md)
+#   ./scripts/deploy.sh metricbeat node/pod/container metrics on aks-1 (DaemonSet)  — ticket 6
 #   ./scripts/deploy.sh diff       read-only: show what `stack` and `heartbeat` would change
 #
 # TLS model: Elasticsearch serves ECK-managed HTTPS and runs outside the mesh (SAML needs
@@ -127,6 +128,8 @@ show_diff() {
   monitors_configmap | kubectl diff -f - || true
   echo "── heartbeat ──"
   render manifests/heartbeat.yaml | kubectl diff -f - || true
+  echo "── metricbeat ──"
+  render manifests/metricbeat.yaml | kubectl diff -f - || true
 }
 
 monitors_configmap() {
@@ -248,11 +251,39 @@ install_stack() {
   echo "✓ Elasticsearch + Kibana deployed to $CLUSTER namespace=$NAMESPACE"
 }
 
+install_metricbeat() {
+  echo "── Preflight ──"
+  command -v envsubst >/dev/null || { echo "envsubst not found — install the gettext package" >&2; exit 1; }
+  kubectl get crd beats.beat.k8s.elastic.co >/dev/null 2>&1 \
+    || { echo "ECK Beat CRD missing — run: ./scripts/deploy.sh operator" >&2; exit 1; }
+  kubectl -n "$NAMESPACE" get elasticsearch "$ES_NAME" >/dev/null 2>&1 \
+    || { echo "Elasticsearch not deployed — run: ./scripts/deploy.sh stack" >&2; exit 1; }
+
+  echo "── Metricbeat ──"
+  render manifests/metricbeat.yaml | kubectl apply -f -
+
+  # Not wait_ready: on a node with no free pod slot the DaemonSet pod stays Pending until a
+  # slot is freed by hand, so "green" may never come on its own. Report instead.
+  echo "  waiting 90s for pods to schedule..."
+  sleep 90
+  kubectl -n "$NAMESPACE" get beat metricbeat
+  local pending
+  pending="$(kubectl -n "$NAMESPACE" get pods -l beat.k8s.elastic.co/name=metricbeat \
+    --field-selector=status.phase=Pending -o jsonpath='{range .items[*]}{.metadata.name}{" -> "}{.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchFields[0].values[0]}{"\n"}{end}')"
+  if [[ -n "$pending" ]]; then
+    echo "  Pending (node has no free pod slot) — free one slot per node, elastic.md \"Ticket 6 — Metricbeat\":"
+    sed 's/^/    /' <<<"$pending"
+  else
+    echo "✓ Metricbeat running on every node of $CLUSTER"
+  fi
+}
+
 case "$STEP" in
   operator) install_operator ;;
   stack)    install_stack ;;
   heartbeat) install_heartbeat ;;
+  metricbeat) install_metricbeat ;;
   diff)     show_diff ;;
   all)      install_operator; install_stack ;;
-  *) echo "usage: $0 [operator|stack|all|heartbeat|diff]" >&2; exit 1 ;;
+  *) echo "usage: $0 [operator|stack|all|heartbeat|metricbeat|diff]" >&2; exit 1 ;;
 esac

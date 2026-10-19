@@ -101,6 +101,47 @@ curl -v --resolve kibana.iguana.internal:443:$IP        https://kibana.iguana.in
 curl -v --resolve elasticsearch.iguana.internal:443:$IP https://elasticsearch.iguana.internal/
 ```
 
+## Ticket 6 — Beats on aks-1
+
+**1. Spread ES one pod per VM** (needs 4 nodes in nodepool1 — min was raised to 4).
+`manifests/elasticsearch.yaml` requires one ES pod per node. Applying it is a normal ECK
+rolling restart, one pod at a time, each waiting for green:
+```bash
+./scripts/deploy.sh diff        # elasticsearch section: only the added affinity block
+./scripts/deploy.sh stack       # SAML_METADATA_FILE not needed — the ConfigMap is kept
+kubectl -n elastic get pods -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch -o wide
+# want: 3 different NODE values
+```
+A pod stuck Pending with `didn't match pod anti-affinity rules` means no node without an ES pod
+has a free slot — free one (step 3) on any node that has no ES pod.
+
+**2. Heartbeat** — see `HEARTBEAT.md`:
+```bash
+HEARTBEAT_CA_FILE=/path/to/heartbeat-ca-bundle.pem ./scripts/deploy.sh heartbeat
+```
+
+**3. Metricbeat:**
+```bash
+./scripts/deploy.sh metricbeat
+```
+It lists any pod left Pending because its node is at the 30-pod limit. A new node doesn't help
+(a DaemonSet pod is pinned to its node) and nothing rebalances on its own, so free **one** slot
+on each such node, once. DaemonSet pods tolerate a cordon; ordinary pods don't — so:
+```bash
+N=<node from the Pending list>
+kubectl cordon $N
+# Pick ONE pod on $N owned by a ReplicaSet (i.e. a Deployment), preferably with 2+ replicas,
+# not in kube-system / elastic / aks-istio-*:
+kubectl get pods -A --field-selector spec.nodeName=$N \
+  -o custom-columns=NS:.metadata.namespace,POD:.metadata.name,OWNER:.metadata.ownerReferences[0].kind,RS:.metadata.ownerReferences[0].name \
+  | grep ReplicaSet
+kubectl -n <ns> delete pod <pod>     # its replacement lands on another node ($N is cordoned)
+kubectl -n elastic get pods -l beat.k8s.elastic.co/name=metricbeat -o wide | grep $N   # Running
+kubectl uncordon $N
+```
+Then `kubectl -n elastic get beat` shows metricbeat `green`, and Kibana → Discover
+(`metricbeat-*`) shows `kubernetes.node.*` / `kubernetes.pod.*` documents for every node.
+
 ## Ticket 7 — SSO with Entra ID
 
 **1. Trial license** (30 days; unlocks SAML). Request the Enterprise license the same day.

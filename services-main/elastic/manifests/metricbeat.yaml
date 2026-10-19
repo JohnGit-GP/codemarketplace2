@@ -1,0 +1,97 @@
+# Rendered by scripts/deploy.sh (`metricbeat` step). Variables: NAMESPACE STACK_VERSION ES_NAME CLUSTER
+#
+# Metricbeat on aks-1: one pod per node (DaemonSet) reading that node's kubelet for node, pod,
+# container and volume CPU/memory/network/disk usage. Deliberately no hostPath mounts, no root
+# and no hostNetwork — the kubelet API gives the same Kubernetes metrics without the privileges
+# a locked-down cluster may refuse.
+#
+# A DaemonSet pod can only run on a node with a free pod slot. deploy.sh lists any pod left
+# Pending on a full node; elastic.md ("Ticket 6 — Metricbeat") has the one-time fix.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: metricbeat
+  namespace: ${NAMESPACE}
+---
+# Read-only: kubelet stats, plus object metadata so every metric carries its pod/namespace/
+# deployment names.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: elastic-metricbeat
+rules:
+  - apiGroups: [""]
+    resources: [nodes, nodes/stats, nodes/metrics, pods, namespaces]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [replicasets, deployments, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: elastic-metricbeat
+subjects:
+  - kind: ServiceAccount
+    name: metricbeat
+    namespace: ${NAMESPACE}
+roleRef:
+  kind: ClusterRole
+  name: elastic-metricbeat
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: beat.k8s.elastic.co/v1beta1
+kind: Beat
+metadata:
+  name: metricbeat
+  namespace: ${NAMESPACE}
+spec:
+  type: metricbeat
+  version: ${STACK_VERSION}
+  elasticsearchRef:
+    name: ${ES_NAME}
+  config:
+    metricbeat.modules:
+      - module: kubernetes
+        metricsets: [node, system, pod, container, volume]
+        period: 60s
+        # This node's kubelet, by IP: node hostnames don't necessarily resolve in the enclave.
+        hosts: ["https://${NODE_IP}:10250"]
+        node: ${NODE_NAME}
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        # The kubelet's serving certificate is self-signed per node; the connection is still TLS.
+        ssl.verification_mode: none
+        add_metadata: true
+    # 30-day retention, not Beats' default policy (which never deletes).
+    setup.ilm.policy_name: beats-30d
+    processors:
+      - add_fields:
+          target: labels
+          fields:
+            cluster: ${CLUSTER}
+  daemonSet:
+    podTemplate:
+      metadata:
+        labels:
+          # Out of the mesh like Heartbeat: no inbound traffic, ES reached over ECK TLS.
+          sidecar.istio.io/inject: "false"
+      spec:
+        serviceAccountName: metricbeat
+        automountServiceAccountToken: true
+        # Every node, including any with a NoSchedule taint.
+        tolerations:
+          - operator: Exists
+            effect: NoSchedule
+        containers:
+          - name: metricbeat
+            env:
+              - name: NODE_NAME
+                valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+              - name: NODE_IP
+                valueFrom: { fieldRef: { fieldPath: status.hostIP } }
+            resources:
+              requests: { cpu: 100m, memory: 200Mi }
+              limits: { memory: 400Mi }

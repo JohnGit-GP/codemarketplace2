@@ -49,6 +49,17 @@ spec:
             sidecar.istio.io/inject: "false"
         spec:
           automountServiceAccountToken: true
+          # One ES pod per VM, enforced. ECK's default anti-affinity is only *preferred*, which let
+          # all three land on one VM when the other nodes were out of pod slots — one VM failure
+          # then takes the whole cluster down. Needs ES_NODE_COUNT nodes with a free slot each
+          # (nodepool1 min is 4 for this reason).
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      elasticsearch.k8s.elastic.co/cluster-name: ${ES_NAME}
+                  topologyKey: kubernetes.io/hostname
           containers:
             - name: elasticsearch
               resources:

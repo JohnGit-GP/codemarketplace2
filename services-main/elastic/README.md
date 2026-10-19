@@ -90,7 +90,7 @@ flowchart LR
 | Ingress | `aks-istio-ingress` ns, label `istio=aks-istio-ingressgateway-internal` — **✓ verified on aks-1** |
 | **Gateway TLS secrets** | live in **`aks-istio-ingress`**, not the app namespace |
 | Sidecars | native — pods show `Init:1/2` permanently with `READY 1/1`. Normal. |
-| aks-1 capacity | `nodepool1`: non-zonal, ~7.8 CPU / ~30Gi allocatable each; **autoscaler 2→3 (max 3)**. CPU/memory are ample, but **pod slots are the limit** — both nodes hit max pods during the STRICT test and forced a scale-up to 3. Size ticket 6 (Beats) against pod slots |
+| aks-1 capacity | Cluster `bm-igna004-100-fox-ops-ars-aks-1` (RG `bm-igna004-100-fox-ops-ars-aks-rg`). `nodepool1`: Standard_D8ads_v6, non-zonal, 30 max pods; **autoscaler min 4 / max 5** (raised 2026-10-19 from 2/3 — roll back with those values). CPU/memory are ample; **pod slots are the limit** |
 | Spoke → aks-1 network | TCP 443 to the aks-1 internal gateway — **✓ open** |
 | kubectl contexts | **`cluster3`** = aks-1 (hub) · **`cluster2`** = atl-aks (same cluster as context `bm-igna004-100-fox-ops-ars-atl-aks`; Jira, Confluence) · **`cluster1`** = gl-aks (GitLab, Artifactory, code-marketplace) |
 | Spoke reachability | Both spokes resolve `elasticsearch.iguana.internal`, reach the gateway on 443, and pull from the ACR (verified 2026-10-19, `scripts/gather-beats-inputs.sh`) |
@@ -137,13 +137,14 @@ flowchart LR
 - **30 days is the ceiling for SLA reports too.** Anything older is deleted — monthly SLA reports
   must be produced (or exported) before the data ages out. Snapshots expire at 30 days as well,
   so they can't be used to reach further back.
-- **Open risk — all 3 ES pods on one VM** (found 2026-10-19). ECK's pod anti-affinity is only
-  *preferred*, and the manual restarts during the TLS switch happened while the other nodes had no
-  free pod slots, so every ES pod landed on `vmss000000`. Losing that VM takes Elasticsearch down
-  until it returns (disks are persistent, so no data loss). Fix once each of 3 nodes has a free
-  slot (raise the nodepool1 autoscaler max, or a new pool): add *required* anti-affinity on
-  `kubernetes.io/hostname` to `manifests/elasticsearch.yaml` and run `deploy.sh stack`. Don't add it
-  before then — the rolling restart would leave a pod Pending with nowhere to go.
+- **ES pods must stay one per VM.** All three once landed on a single VM (ECK's default
+  anti-affinity is only *preferred*, and the other nodes had no free pod slots). Now enforced:
+  `manifests/elasticsearch.yaml` requires one ES pod per node, and nodepool1's autoscaler min is 4
+  so a node without an ES pod always exists for a rescheduled one. Don't lower the min below
+  ES_NODE_COUNT + 1, or a failed node's ES pod has nowhere to go.
+- **Pod slots, not CPU/memory, are the limit** (30 per node). A DaemonSet pod is pinned to its node,
+  so on a full node it stays Pending however many nodes are added — free one slot by hand
+  (elastic.md, "Ticket 6 — Metricbeat").
 - **Entra group overage:** SAML tokens stop listing groups past ~150 memberships. Configure
   the enterprise app to emit only *groups assigned to the application*.
 
@@ -170,6 +171,7 @@ flowchart LR
 | `manifests/peerauthentication.yaml` | STRICT mTLS for the `elastic` namespace — required |
 | `manifests/eck-trial-license.yaml` | 30-day ECK enterprise trial (unlocks SAML) |
 | `manifests/istio.yaml` | Gateway + VirtualServices for Kibana and Elasticsearch; DestinationRule re-encrypting to ES |
+| `manifests/metricbeat.yaml` | Metricbeat (ECK Beat, DaemonSet) on aks-1 + its read-only RBAC |
 | `manifests/heartbeat.yaml` | Heartbeat (ECK Beat) on aks-1 — runs the uptime checks |
 | `manifests/heartbeat-monitors.yml` | **The SLA target list** — edit to add a service (`HEARTBEAT.md`) |
 | `HEARTBEAT.md` | How to add, change or remove a monitored service |
