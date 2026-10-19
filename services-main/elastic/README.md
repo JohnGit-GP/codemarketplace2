@@ -92,7 +92,9 @@ flowchart LR
 | Sidecars | native — pods show `Init:1/2` permanently with `READY 1/1`. Normal. |
 | aks-1 capacity | `nodepool1`: non-zonal, ~7.8 CPU / ~30Gi allocatable each; **autoscaler 2→3 (max 3)**. CPU/memory are ample, but **pod slots are the limit** — both nodes hit max pods during the STRICT test and forced a scale-up to 3. Size ticket 6 (Beats) against pod slots |
 | Spoke → aks-1 network | TCP 443 to the aks-1 internal gateway — **✓ open** |
-| kubectl context | **`cluster3`** is the context name for aks-1 |
+| kubectl contexts | **`cluster3`** = aks-1 (hub) · **`cluster2`** = atl-aks (same cluster as context `bm-igna004-100-fox-ops-ars-atl-aks`; Jira, Confluence) · **`cluster1`** = gl-aks (GitLab, Artifactory, code-marketplace) |
+| Spoke reachability | Both spokes resolve `elasticsearch.iguana.internal`, reach the gateway on 443, and pull from the ACR (verified 2026-10-19, `scripts/gather-beats-inputs.sh`) |
+| Pod slots (2026-10-19) | 30 max pods per node everywhere. aks-1 free per node: 0 / 0 / 12; gl-aks: 2 / 1 / 0; atl-aks: 10–18. A Metricbeat DaemonSet can't land on full nodes — needs a capacity decision for aks-1 and gl-aks |
 | Registry | Gov ACR (name supplied at runtime via `ACR_NAME`) — **✓ aks-1 pull access confirmed** (prior deployments) |
 | Image transfer | `docker pull --platform linux/amd64` + `docker save` → tar → `docker load` + push |
 | ACR auth | `az acr login -n <acr>` |
