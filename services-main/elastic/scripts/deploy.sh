@@ -35,6 +35,17 @@ render() {
   envsubst '${ES_NAME} ${KIBANA_NAME} ${NAMESPACE} ${STACK_VERSION} ${ES_NODE_COUNT} ${ES_DISK_SIZE} ${ES_MEMORY} ${STORAGE_CLASS} ${KIBANA_HOST} ${ES_HOST} ${ISTIO_INGRESS_SELECTOR} ${SAML_ENABLED} ${SAML_IDP_ENTITY_ID} ${CLUSTER}' < "$1"
 }
 
+# ECK can report Ready/green for a moment after accepting a new spec, before it restarts any
+# pod. For Elasticsearch, also require every StatefulSet pod to be on the current template.
+rollout_done() {
+  [[ "$1" == elasticsearch ]] || return 0
+  local bad
+  bad="$(kubectl -n "$NAMESPACE" get statefulset -l "elasticsearch.k8s.elastic.co/cluster-name=$2" \
+    -o jsonpath='{range .items[*]}{.spec.replicas}/{.status.updatedReplicas}/{.status.readyReplicas}{"\n"}{end}' \
+    | awk -F/ '$1 != $2 || $1 != $3')"
+  [[ -z "$bad" ]]
+}
+
 # Wait until ECK has acted on the latest spec (not just the old, still-green state) and the
 # resource is green. A spec change to ES triggers a rolling restart, one node at a time.
 wait_ready() {
@@ -43,7 +54,8 @@ wait_ready() {
   for (( t = 0; t < timeout_s; t += 10 )); do
     IFS='|' read -r og health phase < <(kubectl -n "$NAMESPACE" get "$kind/$name" \
       -o jsonpath='{.status.observedGeneration}|{.status.health}|{.status.phase}{"\n"}')
-    if [[ "${og:-$gen}" == "$gen" && "$health" == green && "${phase:-Ready}" == Ready ]]; then
+    if [[ "${og:-$gen}" == "$gen" && "$health" == green && "${phase:-Ready}" == Ready ]] \
+       && rollout_done "$kind" "$name"; then
       echo "  $kind/$name green"; return 0
     fi
     sleep 10
