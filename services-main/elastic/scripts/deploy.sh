@@ -372,6 +372,23 @@ install_spoke() {
   fi
 }
 
+# Hub steps act on the current kubectl context. Spoke work switches contexts, so check we're on
+# aks-1 before touching anything (AKS labels every node with its node resource group).
+require_hub() {
+  local rg ctx
+  ctx="$(kubectl config current-context 2>/dev/null || echo none)"
+  rg="$(kubectl get nodes -o jsonpath='{.items[0].metadata.labels.kubernetes\.azure\.com/cluster}' 2>/dev/null || true)"
+  [[ "$rg" == "$HUB_NODE_RG" ]] || {
+    echo "Current context '$ctx' is not $CLUSTER (node RG '${rg:-unknown}', want '$HUB_NODE_RG')." >&2
+    echo "Switch first: kubectl config use-context <aks-1 context>   (cluster3 on the jumpbox)" >&2
+    exit 1
+  }
+}
+
+case "$STEP" in
+  operator|stack|all|heartbeat|metricbeat|azure|diff) require_hub ;;
+esac
+
 case "$STEP" in
   operator) install_operator ;;
   stack)    install_stack ;;
