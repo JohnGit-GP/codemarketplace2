@@ -311,7 +311,7 @@ install_spoke() {
   rg="$("${k[@]}" get nodes -o jsonpath='{.items[0].metadata.labels.kubernetes\.azure\.com/cluster}')"
   [[ "$rg" == *"-$SPOKE_CLUSTER-"* ]] \
     || { echo "context $ctx is node RG '$rg', which doesn't look like $SPOKE_CLUSTER" >&2; exit 1; }
-  "${k[@]}" get ns "$SPOKE_NAMESPACE" >/dev/null 2>&1 || "${k[@]}" create namespace "$SPOKE_NAMESPACE"
+  "${k[@]}" create namespace "$SPOKE_NAMESPACE" --dry-run=client -o yaml | "${k[@]}" apply -f - >/dev/null
 
   echo "── Credentials ──"
   if [[ -n "${SPOKE_API_KEY_FILE:-}" ]]; then
