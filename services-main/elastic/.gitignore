@@ -6,3 +6,4 @@ backups/
 *.vsix
 .env
 values-rendered.yaml
+phase1-inputs-*.txt
