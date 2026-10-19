@@ -94,6 +94,7 @@ flowchart LR
 | Spoke → aks-1 network | TCP 443 to the aks-1 internal gateway — **✓ open** |
 | kubectl contexts | **`cluster3`** = aks-1 (hub) · **`cluster2`** = atl-aks (same cluster as context `bm-igna004-100-fox-ops-ars-atl-aks`; Jira, Confluence) · **`cluster1`** = gl-aks (GitLab, Artifactory, code-marketplace) |
 | Spoke reachability | Both spokes resolve `elasticsearch.iguana.internal`, reach the gateway on 443, and pull from the ACR (verified 2026-10-19, `scripts/gather-beats-inputs.sh`) |
+| gl-aks capacity | Cluster `bm-igna004-100-fox-ops-ars-gl-aks` (RG `bm-igna004-100-fox-ops-ars-gl-rg`), pool `system`, Standard_D8ads_v6, 30 max pods; **autoscaler min 4 / max 5** (raised 2026-10-19 from 2/4 — roll back with those values) |
 | Pod slots (2026-10-19) | 30 max pods per node everywhere. aks-1 free per node: 0 / 0 / 12; gl-aks: 2 / 1 / 0; atl-aks: 10–18. A Metricbeat DaemonSet can't land on full nodes — needs a capacity decision for aks-1 and gl-aks |
 | Registry | Gov ACR (name supplied at runtime via `ACR_NAME`) — **✓ aks-1 pull access confirmed** (prior deployments) |
 | Image transfer | `docker pull --platform linux/amd64` + `docker save` → tar → `docker load` + push |
