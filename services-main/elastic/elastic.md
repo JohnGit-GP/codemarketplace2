@@ -194,6 +194,58 @@ GET metricbeat-*/_search?size=0
 **Revoke a spoke** (lost key, decommissioned cluster): `DELETE /_security/api_key {"name": "metricbeat-atl-aks"}`,
 then create a new one and re-run step 2 with `SPOKE_API_KEY_FILE`.
 
+## Ticket 6 — Azure metrics
+
+One Metricbeat pod on aks-1 reads Azure Monitor (Gov endpoints) for the 3 AKS clusters
+(`container_service`) and their node scale sets (`compute_vm_scaleset`). aks-1 egress to
+`login.microsoftonline.us` and `management.usgovcloudapi.net` is open (verified 2026-10-19).
+
+**1. Service principal** (portal.azure.us; needs app-registration rights + Owner / User Access
+Administrator / RBAC Administrator on the subscription — else ask the Azure admin):
+- Entra ID → App registrations → New registration: **`bm-igna004-100-fox-ops-ars-metricbeat`**,
+  single tenant, no redirect URI. Note the *Application (client) ID*.
+- Certificates & secrets → New client secret, 12 months. Copy the **Value** (shown once). Note the expiry.
+- Subscriptions → bm-igna004-100-fox-ops-sub → Access control (IAM) → Add role assignment →
+  **Monitoring Reader** → members: the app → Review + assign.
+
+**2. Secret on aks-1** — paste the secret Value into a file, never onto a command line:
+```bash
+umask 077; cat > ~/sp.secret          # paste, Enter, Ctrl-D
+kubectl -n elastic create secret generic azure-metrics-sp \
+  --from-file=client_secret=$HOME/sp.secret \
+  --from-literal=client_id=<application-client-id> \
+  --from-literal=tenant_id=4dcf8fb0-8060-4ec6-9365-38894b949acb \
+  --from-literal=subscription_id=ac488a17-c5fd-4fcf-a55d-344784fcd48a
+shred -u ~/sp.secret
+```
+
+**3. Deploy and verify:**
+```bash
+./scripts/deploy.sh azure
+kubectl -n elastic logs deploy/metricbeat-azure-beat-metricbeat --tail=100 | grep -i -E '"log.level":"error"|azure' | tail
+```
+After ~10 minutes, Kibana → Dev Tools:
+```
+GET metricbeat-*/_search?size=0
+{ "query": { "bool": { "filter": [ { "term": { "event.module": "azure" } },
+                                   { "range": { "@timestamp": { "gte": "now-30m" } } } ] } },
+  "aggs": { "t": { "terms": { "field": "azure.resource.type" },
+    "aggs": { "r": { "terms": { "field": "azure.resource.name", "size": 20 } } } } } }
+```
+Expect `Microsoft.ContainerService/managedClusters` (3 clusters) and
+`Microsoft.Compute/virtualMachineScaleSets` (their node pools).
+
+| Log error | Fix |
+|---|---|
+| `AADSTS7000215` invalid client secret | the secret Value (not the Secret ID) — recreate `azure-metrics-sp` |
+| `AADSTS700016` application not found | wrong client ID or tenant |
+| `AuthorizationFailed` | Monitoring Reader not assigned (or not yet propagated — wait 10 min) |
+| no errors, no data for one type | resource group names in `manifests/metricbeat-azure.yaml` |
+
+**Renewal:** when the client secret expires Azure metrics stop silently. Create a new secret in
+the portal, recreate `azure-metrics-sp` (step 2, with `--dry-run=client -o yaml | kubectl apply -f -`),
+then `kubectl -n elastic rollout restart deploy/metricbeat-azure-beat-metricbeat`.
+
 ## Ticket 7 — SSO with Entra ID
 
 **1. Trial license** (30 days; unlocks SAML). Request the Enterprise license the same day.

@@ -178,6 +178,7 @@ flowchart LR
 | `manifests/metricbeat.yaml` | Metricbeat (ECK Beat, DaemonSet) on aks-1 + its read-only RBAC |
 | `manifests/spoke-metricbeat.yaml` | Metricbeat for atl-aks / gl-aks (plain manifests, API key, ships via the gateway) |
 | `manifests/es-api/api-key-spoke-metricbeat.json` | Write-only API key request for a spoke |
+| `manifests/metricbeat-azure.yaml` | Azure Monitor metrics (AKS + node scale sets) via service principal secret `azure-metrics-sp` |
 | `manifests/heartbeat.yaml` | Heartbeat (ECK Beat) on aks-1 — runs the uptime checks |
 | `manifests/heartbeat-monitors.yml` | **The SLA target list** — edit to add a service (`HEARTBEAT.md`) |
 | `HEARTBEAT.md` | How to add, change or remove a monitored service |

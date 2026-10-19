@@ -8,6 +8,7 @@
 #   ./scripts/deploy.sh heartbeat  uptime checks from manifests/heartbeat-monitors.yml — ticket 6
 #                                  (re-run after editing the monitor list; see HEARTBEAT.md)
 #   ./scripts/deploy.sh metricbeat node/pod/container metrics on aks-1 (DaemonSet)  — ticket 6
+#   ./scripts/deploy.sh azure      Azure Monitor metrics (needs secret azure-metrics-sp) — ticket 6
 #   ./scripts/deploy.sh spoke <kubectl-context> <cluster-name>
 #                                  Metricbeat on a spoke (atl-aks, gl-aks), plain manifests
 #   ./scripts/deploy.sh diff       read-only: show what `stack` and `heartbeat` would change
@@ -147,6 +148,8 @@ show_diff() {
   render manifests/heartbeat.yaml | kubectl diff -f - || true
   echo "── metricbeat ──"
   render manifests/metricbeat.yaml | kubectl diff -f - || true
+  echo "── metricbeat-azure ──"
+  render manifests/metricbeat-azure.yaml | kubectl diff -f - || true
 }
 
 monitors_configmap() {
@@ -295,6 +298,23 @@ install_metricbeat() {
   fi
 }
 
+install_azure() {
+  echo "── Preflight ──"
+  command -v envsubst >/dev/null || { echo "envsubst not found — install the gettext package" >&2; exit 1; }
+  kubectl -n "$NAMESPACE" get elasticsearch "$ES_NAME" >/dev/null 2>&1 \
+    || { echo "Elasticsearch not deployed — run: ./scripts/deploy.sh stack" >&2; exit 1; }
+  local keys
+  keys="$(kubectl -n "$NAMESPACE" get secret azure-metrics-sp -o jsonpath='{.data}' 2>/dev/null | jq -r 'keys | sort | join(",")')" \
+    || true
+  [[ "$keys" == "client_id,client_secret,subscription_id,tenant_id" ]] \
+    || { echo "secret azure-metrics-sp missing or incomplete (have: ${keys:-none}) — see elastic.md 'Ticket 6 — Azure'" >&2; exit 1; }
+
+  echo "── Metricbeat (Azure) ──"
+  render manifests/metricbeat-azure.yaml | kubectl apply -f -
+  wait_ready beat metricbeat-azure 300
+  echo "✓ Azure Monitor metrics: first data after ~5–10 minutes (5-minute period)"
+}
+
 install_spoke() {
   local ctx="${SPOKE_CONTEXT:?usage: $0 spoke <kubectl-context> <cluster-name>}"
   SPOKE_CLUSTER="${SPOKE_NAME:?usage: $0 spoke <kubectl-context> <cluster-name>}"
@@ -357,8 +377,9 @@ case "$STEP" in
   stack)    install_stack ;;
   heartbeat) install_heartbeat ;;
   metricbeat) install_metricbeat ;;
+  azure)    install_azure ;;
   spoke)    SPOKE_CONTEXT="${2:-}" SPOKE_NAME="${3:-}" install_spoke ;;
   diff)     show_diff ;;
   all)      install_operator; install_stack ;;
-  *) echo "usage: $0 [operator|stack|all|heartbeat|metricbeat|spoke <ctx> <name>|diff]" >&2; exit 1 ;;
+  *) echo "usage: $0 [operator|stack|all|heartbeat|metricbeat|azure|spoke <ctx> <name>|diff]" >&2; exit 1 ;;
 esac

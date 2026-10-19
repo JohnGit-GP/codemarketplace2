@@ -1,0 +1,79 @@
+# Rendered by scripts/deploy.sh (`azure` step). Variables: NAMESPACE STACK_VERSION ES_NAME CLUSTER
+#
+# One Metricbeat pod on aks-1 pulling Azure Monitor metrics (Azure Government endpoints) for the
+# three AKS clusters and their node scale sets, every 5 minutes. Credentials come from secret
+# azure-metrics-sp (keys tenant_id, client_id, client_secret, subscription_id) — a service
+# principal with Monitoring Reader. Its secret expires: renew it and recreate the secret.
+#
+# To monitor more resource groups or resource types, add them below and re-run
+# `./scripts/deploy.sh azure`. Metric sets: container_service, compute_vm_scaleset, compute_vm,
+# storage, database_account, container_registry, monitor (any resource type, metrics listed by hand).
+apiVersion: beat.k8s.elastic.co/v1beta1
+kind: Beat
+metadata:
+  name: metricbeat-azure
+  namespace: ${NAMESPACE}
+spec:
+  type: metricbeat
+  version: ${STACK_VERSION}
+  elasticsearchRef:
+    name: ${ES_NAME}
+  config:
+    metricbeat.modules:
+      # AKS control-plane view: node conditions, allocatable CPU/memory, pod phase/readiness.
+      - module: azure
+        metricsets: [container_service]
+        period: 300s
+        refresh_list_interval: 600s
+        resource_manager_endpoint: https://management.usgovcloudapi.net/   # Gov cloud; login endpoint follows
+        client_id: ${AZURE_CLIENT_ID}
+        client_secret: ${AZURE_CLIENT_SECRET}
+        tenant_id: ${AZURE_TENANT_ID}
+        subscription_id: ${AZURE_SUBSCRIPTION_ID}
+        resources:
+          - resource_group:          # the clusters' own resource groups
+              - bm-igna004-100-fox-ops-ars-aks-rg
+              - bm-igna004-100-fox-ops-ars-atl-rg
+              - bm-igna004-100-fox-ops-ars-gl-rg
+      # Node VMs from Azure's side: CPU, network, disk throughput and IOPS.
+      - module: azure
+        metricsets: [compute_vm_scaleset]
+        period: 300s
+        refresh_list_interval: 600s
+        resource_manager_endpoint: https://management.usgovcloudapi.net/
+        client_id: ${AZURE_CLIENT_ID}
+        client_secret: ${AZURE_CLIENT_SECRET}
+        tenant_id: ${AZURE_TENANT_ID}
+        subscription_id: ${AZURE_SUBSCRIPTION_ID}
+        resources:
+          - resource_group:          # AKS node resource groups (where the scale sets live)
+              - bm-igna004-100-fox-ops-ars-aks-node-rg
+              - bm-igna004-100-fox-ops-ars-atl-aks-node-rg
+              - bm-igna004-100-fox-ops-ars-gl-aks-node-rg
+    setup.ilm.policy_name: beats-30d
+    processors:
+      - add_fields:
+          target: labels
+          fields:
+            collector: azure-monitor
+  deployment:
+    replicas: 1
+    podTemplate:
+      metadata:
+        labels:
+          sidecar.istio.io/inject: "false"
+      spec:
+        automountServiceAccountToken: true
+        containers:
+          - name: metricbeat
+            env:
+              - { name: AZURE_TENANT_ID,       valueFrom: { secretKeyRef: { name: azure-metrics-sp, key: tenant_id } } }
+              - { name: AZURE_CLIENT_ID,       valueFrom: { secretKeyRef: { name: azure-metrics-sp, key: client_id } } }
+              - { name: AZURE_CLIENT_SECRET,   valueFrom: { secretKeyRef: { name: azure-metrics-sp, key: client_secret } } }
+              - { name: AZURE_SUBSCRIPTION_ID, valueFrom: { secretKeyRef: { name: azure-metrics-sp, key: subscription_id } } }
+            resources:
+              requests: { cpu: 100m, memory: 200Mi }
+              limits: { memory: 400Mi }
+        volumes:
+          - name: beat-data          # replaces ECK's root-owned hostPath (see heartbeat.yaml)
+            emptyDir: {}
