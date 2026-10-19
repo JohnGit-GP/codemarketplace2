@@ -50,6 +50,13 @@ spec:
               - bm-igna004-100-fox-ops-ars-aks-node-rg
               - bm-igna004-100-fox-ops-ars-atl-aks-node-rg
               - bm-igna004-100-fox-ops-ars-gl-aks-node-rg
+        processors:
+          # AKS tags its scale sets `compute.aks.billing`; the dots make it an object, which
+          # clashes with the keyword mapping for tags and Elasticsearch rejects every document.
+          # Tags carry no metric data — drop them for scale sets only.
+          - drop_fields:
+              fields: ["azure.resource.tags"]
+              ignore_missing: true
     setup.ilm.policy_name: beats-30d
     processors:
       - add_fields:

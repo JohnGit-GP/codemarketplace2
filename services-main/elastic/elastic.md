@@ -241,6 +241,8 @@ Expect `Microsoft.ContainerService/managedClusters` (3 clusters) and
 | `AADSTS700016` application not found | wrong client ID or tenant |
 | `AuthorizationFailed` | Monitoring Reader not assigned (or not yet propagated — wait 10 min) |
 | no errors, no data for one type | resource group names in `manifests/metricbeat-azure.yaml` |
+| `Failed to index N events ... dropped` | the reason is in the pod: `kubectl -n elastic exec deploy/metricbeat-azure-beat-metricbeat -- sh -c 'grep -o ".\{0,60\}reason.\{0,250\}" /usr/share/metricbeat/logs/*events-data* \| head -3'` — usually an Azure tag whose name contains dots (drop or rename it with a processor) |
+| `Charges amounted to N` (warn) | Azure Monitor's query-cost counter for each metrics call — informational, not an error |
 
 **Renewal:** when the client secret expires Azure metrics stop silently. Create a new secret in
 the portal, recreate `azure-metrics-sp` (step 2, with `--dry-run=client -o yaml | kubectl apply -f -`),
