@@ -142,6 +142,58 @@ kubectl uncordon $N
 Then `kubectl -n elastic get beat` shows metricbeat `green`, and Kibana → Discover
 (`metricbeat-*`) shows `kubernetes.node.*` / `kubernetes.pod.*` documents for every node.
 
+## Ticket 6 — spokes (atl-aks, gl-aks)
+
+Plain Metricbeat (no ECK on the spokes) shipping to `https://elasticsearch.iguana.internal:443`
+with its own write-only API key. Context → cluster: `cluster2` = atl-aks, `cluster1` = gl-aks.
+gl-aks first needs a free pod slot on every node (raise its pool's min/max as on aks-1).
+
+**1. API key** — Kibana → Dev Tools, one per spoke (replace `atl-aks` for gl-aks):
+```
+POST /_security/api_key
+{
+  "name": "metricbeat-atl-aks",
+  "role_descriptors": {
+    "metricbeat_writer": {
+      "cluster": ["monitor", "read_ilm", "read_pipeline"],
+      "index": [{ "names": ["metricbeat-*"],
+                  "privileges": ["view_index_metadata", "create_doc", "auto_configure"] }]
+    }
+  },
+  "metadata": { "cluster": "atl-aks", "purpose": "metricbeat shipping" }
+}
+```
+The response shows the key once. Save `<id>:<api_key>` — the `id` and `api_key` fields joined by
+a colon, **not** `encoded` — to a file only you can read:
+```bash
+umask 077; printf '%s:%s\n' '<id>' '<api_key>' > ~/metricbeat-atl-aks.key
+```
+
+**2. Deploy:**
+```bash
+ACR_NAME=<acr> SPOKE_API_KEY_FILE=~/metricbeat-atl-aks.key SPOKE_CA_FILE=/path/to/heartbeat-ca-bundle.pem \
+  ./scripts/deploy.sh spoke cluster2 atl-aks
+shred -u ~/metricbeat-atl-aks.key        # it now lives only in the secret
+```
+The script refuses to run if the context's nodes don't belong to the named cluster. Later runs
+need neither file (secret and CA are kept). Pods left Pending on a full node: free one slot
+(same steps as aks-1, with `--context`).
+
+**3. Verify:**
+```bash
+kubectl --context cluster2 -n elastic-beats logs ds/metricbeat --tail=50 | grep -i -E '"log.level":"error"|connection' | tail
+```
+Kibana → Dev Tools — each cluster should appear with its node count:
+```
+GET metricbeat-*/_search?size=0
+{ "query": { "range": { "@timestamp": { "gte": "now-5m" } } },
+  "aggs": { "c": { "terms": { "field": "labels.cluster" },
+    "aggs": { "nodes": { "cardinality": { "field": "kubernetes.node.name" } } } } } }
+```
+
+**Revoke a spoke** (lost key, decommissioned cluster): `DELETE /_security/api_key {"name": "metricbeat-atl-aks"}`,
+then create a new one and re-run step 2 with `SPOKE_API_KEY_FILE`.
+
 ## Ticket 7 — SSO with Entra ID
 
 **1. Trial license** (30 days; unlocks SAML). Request the Enterprise license the same day.

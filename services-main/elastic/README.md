@@ -175,6 +175,8 @@ flowchart LR
 | `manifests/eck-trial-license.yaml` | 30-day ECK enterprise trial (unlocks SAML) |
 | `manifests/istio.yaml` | Gateway + VirtualServices for Kibana and Elasticsearch; DestinationRule re-encrypting to ES |
 | `manifests/metricbeat.yaml` | Metricbeat (ECK Beat, DaemonSet) on aks-1 + its read-only RBAC |
+| `manifests/spoke-metricbeat.yaml` | Metricbeat for atl-aks / gl-aks (plain manifests, API key, ships via the gateway) |
+| `manifests/es-api/api-key-spoke-metricbeat.json` | Write-only API key request for a spoke |
 | `manifests/heartbeat.yaml` | Heartbeat (ECK Beat) on aks-1 — runs the uptime checks |
 | `manifests/heartbeat-monitors.yml` | **The SLA target list** — edit to add a service (`HEARTBEAT.md`) |
 | `HEARTBEAT.md` | How to add, change or remove a monitored service |

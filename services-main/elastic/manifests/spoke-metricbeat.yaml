@@ -1,0 +1,125 @@
+# Metricbeat for a spoke cluster (atl-aks, gl-aks). Rendered by `deploy.sh spoke <context> <name>`.
+# Variables: SPOKE_NAMESPACE SPOKE_CLUSTER BEATS_IMAGE ES_HOST
+#
+# Plain manifests — ECK is only on aks-1. Same metrics as aks-1 (each node's kubelet), shipped
+# through the aks-1 internal gateway on 443 with a per-cluster write-only API key (secret
+# metricbeat-es) and the Iguana CA (ConfigMap metricbeat-ca). aks-1's Metricbeat owns the index
+# template and ILM policy, so this one only writes: setup is disabled.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${SPOKE_NAMESPACE}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: metricbeat
+  namespace: ${SPOKE_NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: elastic-metricbeat
+rules:
+  - apiGroups: [""]
+    resources: [nodes, nodes/stats, nodes/metrics, pods, namespaces]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [replicasets, deployments, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: elastic-metricbeat
+subjects:
+  - kind: ServiceAccount
+    name: metricbeat
+    namespace: ${SPOKE_NAMESPACE}
+roleRef:
+  kind: ClusterRole
+  name: elastic-metricbeat
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metricbeat-config
+  namespace: ${SPOKE_NAMESPACE}
+data:
+  metricbeat.yml: |
+    metricbeat.modules:
+      - module: kubernetes
+        metricsets: [node, system, pod, container, volume]
+        period: 60s
+        hosts: ["https://${NODE_IP}:10250"]
+        node: ${NODE_NAME}
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        ssl.verification_mode: none      # kubelet serving certs are self-signed per node
+        add_metadata: true
+    processors:
+      - add_fields:
+          target: labels
+          fields:
+            cluster: ${SPOKE_CLUSTER}
+    output.elasticsearch:
+      # The port is required: Beats default to 9200 when a URL has none, and only 443 is exposed.
+      hosts: ["https://${ES_HOST}:443"]
+      api_key: ${ES_API_KEY}
+      ssl.certificate_authorities: [/etc/metricbeat-ca/ca-bundle.pem]
+    # Write-only key: aks-1 already created the template, data stream and beats-30d policy.
+    setup.template.enabled: false
+    setup.ilm.enabled: false
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: metricbeat
+  namespace: ${SPOKE_NAMESPACE}
+  labels: { app: metricbeat }
+spec:
+  selector:
+    matchLabels: { app: metricbeat }
+  template:
+    metadata:
+      labels:
+        app: metricbeat
+        sidecar.istio.io/inject: "false"
+    spec:
+      serviceAccountName: metricbeat
+      automountServiceAccountToken: true
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: metricbeat
+          image: ${BEATS_IMAGE}
+          args: ["-c", "/etc/metricbeat/metricbeat.yml", "-e"]
+          env:
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+            - name: NODE_IP
+              valueFrom: { fieldRef: { fieldPath: status.hostIP } }
+            - name: ES_API_KEY                     # "id:api_key"
+              valueFrom: { secretKeyRef: { name: metricbeat-es, key: api_key } }
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 100m, memory: 200Mi }
+            limits: { memory: 400Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/metricbeat, readOnly: true }
+            - { name: ca, mountPath: /etc/metricbeat-ca, readOnly: true }
+            - { name: data, mountPath: /usr/share/metricbeat/data }
+      volumes:
+        - name: config
+          configMap: { name: metricbeat-config, defaultMode: 0444 }
+        - name: ca
+          configMap: { name: metricbeat-ca }
+        - name: data
+          emptyDir: {}

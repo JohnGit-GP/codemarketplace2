@@ -8,6 +8,8 @@
 #   ./scripts/deploy.sh heartbeat  uptime checks from manifests/heartbeat-monitors.yml — ticket 6
 #                                  (re-run after editing the monitor list; see HEARTBEAT.md)
 #   ./scripts/deploy.sh metricbeat node/pod/container metrics on aks-1 (DaemonSet)  — ticket 6
+#   ./scripts/deploy.sh spoke <kubectl-context> <cluster-name>
+#                                  Metricbeat on a spoke (atl-aks, gl-aks), plain manifests
 #   ./scripts/deploy.sh diff       read-only: show what `stack` and `heartbeat` would change
 #
 # TLS model: Elasticsearch serves ECK-managed HTTPS and runs outside the mesh (SAML needs
@@ -20,6 +22,8 @@
 #                                   entra-saml-metadata ConfigMap, which turns SAML on (ticket 7)
 #               HEARTBEAT_CA_FILE   PEM bundle of every CA the uptime checks must trust; required
 #                                   on the first `heartbeat` run, optional after (secret is kept)
+#               SPOKE_API_KEY_FILE  file holding the spoke's "id:api_key"; first `spoke` run only
+#               SPOKE_CA_FILE       PEM bundle with the Iguana CA; first `spoke` run only
 set -euo pipefail
 
 SVC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"; cd "$SVC_DIR"
@@ -31,8 +35,9 @@ ISTIO_REV="$(jq -r '.istio.revision' service.json)"
 
 render() {
   export ES_NAME KIBANA_NAME NAMESPACE STACK_VERSION ES_NODE_COUNT ES_DISK_SIZE ES_MEMORY \
-         STORAGE_CLASS KIBANA_HOST ES_HOST ISTIO_INGRESS_SELECTOR SAML_ENABLED SAML_IDP_ENTITY_ID CLUSTER
-  envsubst '${ES_NAME} ${KIBANA_NAME} ${NAMESPACE} ${STACK_VERSION} ${ES_NODE_COUNT} ${ES_DISK_SIZE} ${ES_MEMORY} ${STORAGE_CLASS} ${KIBANA_HOST} ${ES_HOST} ${ISTIO_INGRESS_SELECTOR} ${SAML_ENABLED} ${SAML_IDP_ENTITY_ID} ${CLUSTER}' < "$1"
+         STORAGE_CLASS KIBANA_HOST ES_HOST ISTIO_INGRESS_SELECTOR SAML_ENABLED SAML_IDP_ENTITY_ID CLUSTER \
+         SPOKE_NAMESPACE SPOKE_CLUSTER BEATS_IMAGE
+  envsubst '${ES_NAME} ${KIBANA_NAME} ${NAMESPACE} ${STACK_VERSION} ${ES_NODE_COUNT} ${ES_DISK_SIZE} ${ES_MEMORY} ${STORAGE_CLASS} ${KIBANA_HOST} ${ES_HOST} ${ISTIO_INGRESS_SELECTOR} ${SAML_ENABLED} ${SAML_IDP_ENTITY_ID} ${CLUSTER} ${SPOKE_NAMESPACE} ${SPOKE_CLUSTER} ${BEATS_IMAGE}' < "$1"
 }
 
 # ECK can report Ready/green for a moment after accepting a new spec, before it restarts any
@@ -290,12 +295,70 @@ install_metricbeat() {
   fi
 }
 
+install_spoke() {
+  local ctx="${SPOKE_CONTEXT:?usage: $0 spoke <kubectl-context> <cluster-name>}"
+  SPOKE_CLUSTER="${SPOKE_NAME:?usage: $0 spoke <kubectl-context> <cluster-name>}"
+  : "${ACR_NAME:?Set ACR_NAME (no .azurecr.us)}"
+  SPOKE_NAMESPACE=elastic-beats
+  BEATS_IMAGE="${ACR_NAME,,}.azurecr.us/beats/metricbeat:${STACK_VERSION}"
+  local k=(kubectl --context "$ctx")
+
+  echo "── Preflight ($ctx = $SPOKE_CLUSTER) ──"
+  command -v envsubst >/dev/null || { echo "envsubst not found — install the gettext package" >&2; exit 1; }
+  "${k[@]}" get nodes >/dev/null || { echo "cannot reach cluster with context $ctx" >&2; exit 1; }
+  # Guard against a context/name mix-up: AKS labels nodes with the cluster's node resource group.
+  local rg
+  rg="$("${k[@]}" get nodes -o jsonpath='{.items[0].metadata.labels.kubernetes\.azure\.com/cluster}')"
+  [[ "$rg" == *"-$SPOKE_CLUSTER-"* ]] \
+    || { echo "context $ctx is node RG '$rg', which doesn't look like $SPOKE_CLUSTER" >&2; exit 1; }
+  "${k[@]}" get ns "$SPOKE_NAMESPACE" >/dev/null 2>&1 || "${k[@]}" create namespace "$SPOKE_NAMESPACE"
+
+  echo "── Credentials ──"
+  if [[ -n "${SPOKE_API_KEY_FILE:-}" ]]; then
+    grep -qE '^[^:[:space:]]+:[^:[:space:]]+$' "$SPOKE_API_KEY_FILE" \
+      || { echo "$SPOKE_API_KEY_FILE must contain one line: <id>:<api_key>" >&2; exit 1; }
+    "${k[@]}" -n "$SPOKE_NAMESPACE" create secret generic metricbeat-es \
+      --from-file=api_key="$SPOKE_API_KEY_FILE" --dry-run=client -o yaml | "${k[@]}" apply -f -
+  elif "${k[@]}" -n "$SPOKE_NAMESPACE" get secret metricbeat-es >/dev/null 2>&1; then
+    echo "  keeping existing metricbeat-es API key"
+  else
+    echo "First run: set SPOKE_API_KEY_FILE (see elastic.md 'Ticket 6 — spokes')" >&2; exit 1
+  fi
+  if [[ -n "${SPOKE_CA_FILE:-}" ]]; then
+    grep -q 'BEGIN CERTIFICATE' "$SPOKE_CA_FILE" || { echo "$SPOKE_CA_FILE has no PEM certificates" >&2; exit 1; }
+    "${k[@]}" -n "$SPOKE_NAMESPACE" create configmap metricbeat-ca \
+      --from-file=ca-bundle.pem="$SPOKE_CA_FILE" --dry-run=client -o yaml | "${k[@]}" apply -f -
+  elif "${k[@]}" -n "$SPOKE_NAMESPACE" get configmap metricbeat-ca >/dev/null 2>&1; then
+    echo "  keeping existing metricbeat-ca"
+  else
+    echo "First run: set SPOKE_CA_FILE to the Iguana CA bundle" >&2; exit 1
+  fi
+
+  echo "── Metricbeat ──"
+  render manifests/spoke-metricbeat.yaml | "${k[@]}" apply -f -
+  # The config lives in a ConfigMap the pods only read at start — restart so edits take effect.
+  "${k[@]}" -n "$SPOKE_NAMESPACE" rollout restart daemonset/metricbeat >/dev/null
+  echo "  waiting 90s for pods to schedule..."
+  sleep 90
+  "${k[@]}" -n "$SPOKE_NAMESPACE" get daemonset metricbeat
+  local pending
+  pending="$("${k[@]}" -n "$SPOKE_NAMESPACE" get pods -l app=metricbeat --field-selector=status.phase=Pending \
+    -o jsonpath='{range .items[*]}{.metadata.name}{" -> "}{.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchFields[0].values[0]}{"\n"}{end}')"
+  if [[ -n "$pending" ]]; then
+    echo "  Pending (node has no free pod slot) — free one slot per node, elastic.md \"Ticket 6 — Beats on aks-1\" step 3:"
+    sed 's/^/    /' <<<"$pending"
+  else
+    echo "✓ Metricbeat scheduled on every node of $SPOKE_CLUSTER — check logs for output errors"
+  fi
+}
+
 case "$STEP" in
   operator) install_operator ;;
   stack)    install_stack ;;
   heartbeat) install_heartbeat ;;
   metricbeat) install_metricbeat ;;
+  spoke)    SPOKE_CONTEXT="${2:-}" SPOKE_NAME="${3:-}" install_spoke ;;
   diff)     show_diff ;;
   all)      install_operator; install_stack ;;
-  *) echo "usage: $0 [operator|stack|all|heartbeat|metricbeat|diff]" >&2; exit 1 ;;
+  *) echo "usage: $0 [operator|stack|all|heartbeat|metricbeat|spoke <ctx> <name>|diff]" >&2; exit 1 ;;
 esac

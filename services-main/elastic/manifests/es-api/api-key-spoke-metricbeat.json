@@ -1,0 +1,13 @@
+{
+  "_comment": "Write-only API key for one spoke's Metricbeat. Replace SPOKE with the cluster name (atl-aks, gl-aks) in both places. See elastic.md 'Ticket 6 — spokes'.",
+  "name": "metricbeat-SPOKE",
+  "role_descriptors": {
+    "metricbeat_writer": {
+      "cluster": ["monitor", "read_ilm", "read_pipeline"],
+      "index": [
+        { "names": ["metricbeat-*"], "privileges": ["view_index_metadata", "create_doc", "auto_configure"] }
+      ]
+    }
+  },
+  "metadata": { "cluster": "SPOKE", "purpose": "metricbeat shipping" }
+}
