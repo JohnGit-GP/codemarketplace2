@@ -137,10 +137,13 @@ flowchart LR
 - **30 days is the ceiling for SLA reports too.** Anything older is deleted — monthly SLA reports
   must be produced (or exported) before the data ages out. Snapshots expire at 30 days as well,
   so they can't be used to reach further back.
-- **Known limitation — 3 ES nodes on 2 VMs.** One VM always hosts two ES pods; if *that* VM fails
-  unplanned, the cluster loses quorum and is down until it returns. Planned drains/upgrades are safe
-  (ECK's PodDisruptionBudget moves pods one at a time). Accepted for TEST; scaling `nodepool1` to 3
-  nodes removes it without redeploying.
+- **Open risk — all 3 ES pods on one VM** (found 2026-10-19). ECK's pod anti-affinity is only
+  *preferred*, and the manual restarts during the TLS switch happened while the other nodes had no
+  free pod slots, so every ES pod landed on `vmss000000`. Losing that VM takes Elasticsearch down
+  until it returns (disks are persistent, so no data loss). Fix once each of 3 nodes has a free
+  slot (raise the nodepool1 autoscaler max, or a new pool): add *required* anti-affinity on
+  `kubernetes.io/hostname` to `manifests/elasticsearch.yaml` and run `deploy.sh stack`. Don't add it
+  before then — the rolling restart would leave a pod Pending with nowhere to go.
 - **Entra group overage:** SAML tokens stop listing groups past ~150 memberships. Configure
   the enterprise app to emit only *groups assigned to the application*.
 
