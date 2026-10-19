@@ -1,0 +1,52 @@
+# Rendered by scripts/deploy.sh (`heartbeat` step). Variables: NAMESPACE STACK_VERSION ES_NAME CLUSTER
+#
+# One Heartbeat on aks-1 runs every uptime check. The checks themselves are NOT in this file:
+# they live in manifests/heartbeat-monitors.yml, which deploy.sh loads into the
+# heartbeat-monitors ConfigMap. Heartbeat re-reads that directory every 30s, so adding a
+# service never restarts this pod. How-to: HEARTBEAT.md.
+apiVersion: beat.k8s.elastic.co/v1beta1
+kind: Beat
+metadata:
+  name: heartbeat
+  namespace: ${NAMESPACE}
+spec:
+  type: heartbeat
+  version: ${STACK_VERSION}
+  elasticsearchRef:
+    name: ${ES_NAME}
+  config:
+    heartbeat.config.monitors:
+      path: /usr/share/heartbeat/monitors.d/*.yml
+      reload.enabled: true
+      reload.period: 30s
+    # Data goes to the heartbeat-* data stream under the 30-day policy, not Beats' default
+    # (which rolls over but never deletes).
+    setup.ilm.policy_name: beats-30d
+    processors:
+      - add_fields:
+          target: labels
+          fields:
+            probe_cluster: ${CLUSTER}     # where the check ran from, not where the service lives
+  deployment:
+    replicas: 1
+    podTemplate:
+      metadata:
+        labels:
+          # Out of the mesh: checks should see the network as clients do, not through a
+          # sidecar. Heartbeat has no inbound traffic, and ES is reached over ECK TLS.
+          sidecar.istio.io/inject: "false"
+      spec:
+        automountServiceAccountToken: true
+        containers:
+          - name: heartbeat
+            resources:
+              requests: { cpu: 100m, memory: 256Mi }
+              limits: { memory: 512Mi }
+            volumeMounts:
+              - { name: monitors, mountPath: /usr/share/heartbeat/monitors.d, readOnly: true }
+              - { name: ca, mountPath: /usr/share/heartbeat/ca, readOnly: true }
+        volumes:
+          - name: monitors
+            configMap: { name: heartbeat-monitors }
+          - name: ca
+            secret: { secretName: heartbeat-ca }   # ca-bundle.pem: every CA the checks must trust

@@ -170,10 +170,14 @@ flowchart LR
 | `manifests/peerauthentication.yaml` | STRICT mTLS for the `elastic` namespace — required |
 | `manifests/eck-trial-license.yaml` | 30-day ECK enterprise trial (unlocks SAML) |
 | `manifests/istio.yaml` | Gateway + VirtualServices for Kibana and Elasticsearch; DestinationRule re-encrypting to ES |
+| `manifests/heartbeat.yaml` | Heartbeat (ECK Beat) on aks-1 — runs the uptime checks |
+| `manifests/heartbeat-monitors.yml` | **The SLA target list** — edit to add a service (`HEARTBEAT.md`) |
+| `HEARTBEAT.md` | How to add, change or remove a monitored service |
 | `manifests/storageclass.yaml` | `managed-csi-premium-retain` |
 | `manifests/es-api/ilm-beats-30d.json` | ILM policy: daily rollover, delete at 30 days |
 | `manifests/es-api/slm-nightly.json` | Nightly snapshots, 30-day expiry |
 | `manifests/es-api/role-mapping-*.json` | SAML role mappings: everyone → `viewer`, `elk_admins` → `superuser` |
 | `scripts/mirror-images.sh` | Docker pull/save + load/tag/push, arch-checked; fetches ECK manifests |
 | `scripts/deploy.sh` | `operator` (CRDs, meshed operator, license) · `stack` (STRICT mTLS, storage, SAML metadata, ES, Kibana, gateway) · `all` |
+| `scripts/gather-beats-inputs.sh` | Pod capacity, published hostnames and spoke reachability (ticket 6 inputs) |
 | `scripts/check-status.sh` | ECK resource health, PVCs, routing, events |

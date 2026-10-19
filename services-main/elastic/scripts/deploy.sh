@@ -5,7 +5,9 @@
 #   ./scripts/deploy.sh stack      STRICT mTLS, storage, Elasticsearch, Kibana,
 #                                  Istio gateway exposure                          — ticket 3
 #   ./scripts/deploy.sh all        both, in order (default)
-#   ./scripts/deploy.sh diff       read-only: show what `stack` would change (kubectl diff)
+#   ./scripts/deploy.sh heartbeat  uptime checks from manifests/heartbeat-monitors.yml — ticket 6
+#                                  (re-run after editing the monitor list; see HEARTBEAT.md)
+#   ./scripts/deploy.sh diff       read-only: show what `stack` and `heartbeat` would change
 #
 # TLS model: Elasticsearch serves ECK-managed HTTPS and runs outside the mesh (SAML needs
 # HTTP TLS on). Kibana is in the mesh under STRICT mTLS and serves plain HTTP in the pod.
@@ -15,6 +17,8 @@
 # Optional env: LICENSE_FILE        Elastic Enterprise license JSON (ticket 7)
 #               SAML_METADATA_FILE  Entra federation metadata XML — creates/updates the
 #                                   entra-saml-metadata ConfigMap, which turns SAML on (ticket 7)
+#               HEARTBEAT_CA_FILE   PEM bundle of every CA the uptime checks must trust; required
+#                                   on the first `heartbeat` run, optional after (secret is kept)
 set -euo pipefail
 
 SVC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"; cd "$SVC_DIR"
@@ -26,8 +30,8 @@ ISTIO_REV="$(jq -r '.istio.revision' service.json)"
 
 render() {
   export ES_NAME KIBANA_NAME NAMESPACE STACK_VERSION ES_NODE_COUNT ES_DISK_SIZE ES_MEMORY \
-         STORAGE_CLASS KIBANA_HOST ES_HOST ISTIO_INGRESS_SELECTOR SAML_ENABLED SAML_IDP_ENTITY_ID
-  envsubst '${ES_NAME} ${KIBANA_NAME} ${NAMESPACE} ${STACK_VERSION} ${ES_NODE_COUNT} ${ES_DISK_SIZE} ${ES_MEMORY} ${STORAGE_CLASS} ${KIBANA_HOST} ${ES_HOST} ${ISTIO_INGRESS_SELECTOR} ${SAML_ENABLED} ${SAML_IDP_ENTITY_ID}' < "$1"
+         STORAGE_CLASS KIBANA_HOST ES_HOST ISTIO_INGRESS_SELECTOR SAML_ENABLED SAML_IDP_ENTITY_ID CLUSTER
+  envsubst '${ES_NAME} ${KIBANA_NAME} ${NAMESPACE} ${STACK_VERSION} ${ES_NODE_COUNT} ${ES_DISK_SIZE} ${ES_MEMORY} ${STORAGE_CLASS} ${KIBANA_HOST} ${ES_HOST} ${ISTIO_INGRESS_SELECTOR} ${SAML_ENABLED} ${SAML_IDP_ENTITY_ID} ${CLUSTER}' < "$1"
 }
 
 # Wait until ECK has acted on the latest spec (not just the old, still-green state) and the
@@ -119,6 +123,67 @@ show_diff() {
     echo "── $f ──"
     render "manifests/$f.yaml" | kubectl diff -f - || true
   done
+  echo "── heartbeat monitors ──"
+  monitors_configmap | kubectl diff -f - || true
+  echo "── heartbeat ──"
+  render manifests/heartbeat.yaml | kubectl diff -f - || true
+}
+
+monitors_configmap() {
+  kubectl -n "$NAMESPACE" create configmap heartbeat-monitors \
+    --from-file=monitors.yml=manifests/heartbeat-monitors.yml --dry-run=client -o yaml
+}
+
+# Catch the mistakes Heartbeat would otherwise only report in its own log: bad YAML,
+# duplicate or missing ids, an entry without a schedule or target.
+check_monitors() {
+  command -v python3 >/dev/null || { echo "  (python3 not found — skipping monitor file check)"; return 0; }
+  python3 -I - manifests/heartbeat-monitors.yml <<'PY'
+import sys, yaml
+mons = yaml.safe_load(open(sys.argv[1])) or []
+errs, seen = [], set()
+for i, m in enumerate(mons, 1):
+    mid = (m or {}).get("id")
+    if not mid: errs.append(f"entry {i}: no id")
+    elif mid in seen: errs.append(f"duplicate id: {mid}")
+    seen.add(mid)
+    for key in ("type", "schedule"):
+        if key not in (m or {}): errs.append(f"{mid or i}: no {key}")
+    if not ((m or {}).get("urls") or (m or {}).get("hosts")): errs.append(f"{mid or i}: no urls/hosts")
+if errs: sys.exit("monitor file errors:\n  " + "\n  ".join(errs))
+print(f"  {len(mons)} monitors OK")
+PY
+}
+
+install_heartbeat() {
+  echo "── Preflight ──"
+  command -v envsubst >/dev/null || { echo "envsubst not found — install the gettext package" >&2; exit 1; }
+  kubectl get crd beats.beat.k8s.elastic.co >/dev/null 2>&1 \
+    || { echo "ECK Beat CRD missing — run: ./scripts/deploy.sh operator" >&2; exit 1; }
+  kubectl -n "$NAMESPACE" get elasticsearch "$ES_NAME" >/dev/null 2>&1 \
+    || { echo "Elasticsearch not deployed — run: ./scripts/deploy.sh stack" >&2; exit 1; }
+  check_monitors
+
+  echo "── CA bundle ──"
+  if [[ -n "${HEARTBEAT_CA_FILE:-}" ]]; then
+    grep -q 'BEGIN CERTIFICATE' "$HEARTBEAT_CA_FILE" \
+      || { echo "$HEARTBEAT_CA_FILE has no PEM certificates" >&2; exit 1; }
+    kubectl -n "$NAMESPACE" create secret generic heartbeat-ca \
+      --from-file=ca-bundle.pem="$HEARTBEAT_CA_FILE" --dry-run=client -o yaml | kubectl apply -f -
+  elif kubectl -n "$NAMESPACE" get secret heartbeat-ca >/dev/null 2>&1; then
+    echo "  keeping existing heartbeat-ca (set HEARTBEAT_CA_FILE to replace it)"
+  else
+    echo "First run: set HEARTBEAT_CA_FILE to a PEM bundle with the Iguana CA (see HEARTBEAT.md)" >&2; exit 1
+  fi
+
+  echo "── Monitors ──"
+  monitors_configmap | kubectl apply -f -
+
+  echo "── Heartbeat ──"
+  render manifests/heartbeat.yaml | kubectl apply -f -
+  wait_ready beat heartbeat 300
+
+  echo "✓ Heartbeat running on $CLUSTER — monitor changes are picked up within ~2 minutes"
 }
 
 install_stack() {
@@ -186,7 +251,8 @@ install_stack() {
 case "$STEP" in
   operator) install_operator ;;
   stack)    install_stack ;;
+  heartbeat) install_heartbeat ;;
   diff)     show_diff ;;
   all)      install_operator; install_stack ;;
-  *) echo "usage: $0 [operator|stack|all|diff]" >&2; exit 1 ;;
+  *) echo "usage: $0 [operator|stack|all|heartbeat|diff]" >&2; exit 1 ;;
 esac

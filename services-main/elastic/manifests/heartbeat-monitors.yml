@@ -1,0 +1,114 @@
+# Uptime checks run by Heartbeat on aks-1 — the SLA target list.
+# To add, change or remove a service, follow HEARTBEAT.md. In short: edit this file, then
+#   ./scripts/deploy.sh heartbeat
+# Heartbeat picks the change up within ~1–2 minutes without restarting.
+#
+# Rules for every entry:
+#   id        unique, lowercase, never reused — it keys the history in Elasticsearch
+#   tags      the cluster that hosts the service (aks-1, gl-aks, atl-aks) plus "sla"
+#   up/down   any HTTP status below 400 is "up" (redirects are not followed, so a 302 to a
+#             login page counts as up); list check.response.status to require specific codes
+#   TLS       *.iguana.internal is verified against the Iguana CA in ca-bundle.pem
+
+# ── aks-1 ──────────────────────────────────────────────────────────────────────────────
+- id: kibana
+  name: Kibana
+  type: http
+  schedule: '@every 60s'
+  urls: ["https://kibana.iguana.internal/login"]
+  tags: [aks-1, sla]
+  ssl.certificate_authorities: [/usr/share/heartbeat/ca/ca-bundle.pem]
+
+- id: elasticsearch
+  name: Elasticsearch
+  type: http
+  schedule: '@every 60s'
+  urls: ["https://elasticsearch.iguana.internal/"]
+  check.response.status: [200, 401]     # 401 = up and asking for credentials
+  tags: [aks-1, sla]
+  ssl.certificate_authorities: [/usr/share/heartbeat/ca/ca-bundle.pem]
+
+- id: argocd-aks-1
+  name: Argo CD (aks-1)
+  type: http
+  schedule: '@every 60s'
+  urls: ["https://foxops.argocd3.iguana.internal/"]
+  tags: [aks-1, sla]
+  ssl.certificate_authorities: [/usr/share/heartbeat/ca/ca-bundle.pem]
+
+- id: arkloud-portal
+  name: Arkloud Portal
+  type: http
+  schedule: '@every 60s'
+  urls: ["https://arkloud-portal.iguana.internal/"]
+  tags: [aks-1, sla]
+  ssl.certificate_authorities: [/usr/share/heartbeat/ca/ca-bundle.pem]
+
+# ── gl-aks ─────────────────────────────────────────────────────────────────────────────
+- id: argocd-gl-aks
+  name: Argo CD (gl-aks)
+  type: http
+  schedule: '@every 60s'
+  urls: ["https://foxops.argocd1.iguana.internal/"]
+  tags: [gl-aks, sla]
+  ssl.certificate_authorities: [/usr/share/heartbeat/ca/ca-bundle.pem]
+
+- id: vscode-marketplace
+  name: VS Code Marketplace
+  type: http
+  schedule: '@every 60s'
+  urls: ["https://vscode-marketplace.iguana.internal/"]
+  tags: [gl-aks, sla]
+  ssl.certificate_authorities: [/usr/share/heartbeat/ca/ca-bundle.pem]
+
+# TODO(CA): *.oversight.af.mil is signed by a CA other than Iguana. Until that CA is added to
+# ca-bundle.pem, these checks skip certificate verification (up/down is still accurate).
+# When it is added, delete the ssl.verification_mode lines below — see HEARTBEAT.md.
+- id: gitlab
+  name: GitLab
+  type: http
+  schedule: '@every 60s'
+  urls: ["https://gitlab.arkloud.oversight.af.mil/"]
+  tags: [gl-aks, sla]
+  ssl.verification_mode: none
+
+- id: artifactory
+  name: Artifactory
+  type: http
+  schedule: '@every 60s'
+  urls: ["https://artifactory.arkloud.oversight.af.mil/"]
+  tags: [gl-aks, sla]
+  ssl.verification_mode: none
+
+# ── atl-aks ────────────────────────────────────────────────────────────────────────────
+- id: argocd-atl-aks
+  name: Argo CD (atl-aks)
+  type: http
+  schedule: '@every 60s'
+  urls: ["https://foxops.argocd2.iguana.internal/"]
+  tags: [atl-aks, sla]
+  ssl.certificate_authorities: [/usr/share/heartbeat/ca/ca-bundle.pem]
+
+- id: confluence
+  name: Confluence
+  type: http
+  schedule: '@every 60s'
+  urls: ["https://confluence.arkloud.oversight.af.mil/"]
+  tags: [atl-aks, sla]
+  ssl.verification_mode: none           # TODO(CA)
+
+- id: jira
+  name: Jira
+  type: http
+  schedule: '@every 60s'
+  urls: ["https://jira.arkloud.oversight.af.mil/"]
+  tags: [atl-aks, sla]
+  ssl.verification_mode: none           # TODO(CA)
+
+- id: rocketchat
+  name: Rocket.Chat
+  type: http
+  schedule: '@every 60s'
+  urls: ["https://rocketchat.oversight.af.mil/"]
+  tags: [atl-aks, sla]
+  ssl.verification_mode: none           # TODO(CA)
