@@ -7,6 +7,7 @@ One folder per deployable service. Each service is self-contained — docs, Bice
 | Service | Status |
 |---|---|
 | [code-marketplace/](./code-marketplace/) | Scaffolded — not yet deployed. VS Code Marketplace gallery for Gov Cloud, Artifactory-backed. |
+| [dmz-artifactory-registry/](./dmz-artifactory-registry/) | Starting. DMZ Artifactory at registry.fox.oversight.af.mil via the Istio ingress gateway with a CA-issued certificate. |
 
 Services still in the legacy `services-status/` layout (artifactory, jira, confluence, gitlab, rocketchat, cameo, argocd) will migrate here one at a time as they're worked on. See `../services-status/README.md` for the canonical service pipeline status.
 
