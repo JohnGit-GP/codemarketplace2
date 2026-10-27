@@ -181,6 +181,7 @@ flowchart LR
 | `manifests/metricbeat-azure.yaml` | Azure Monitor metrics (AKS + node scale sets) via service principal secret `azure-metrics-sp` |
 | `manifests/heartbeat.yaml` | Heartbeat (ECK Beat) on aks-1 — runs the uptime checks |
 | `manifests/heartbeat-monitors.yml` | **The SLA target list** — edit to add a service (`HEARTBEAT.md`) |
+| `METRICBEAT-MODULES.md` | Research: further Metricbeat modules (K8s state, stack monitoring, Istio, …) and recommendations |
 | `HEARTBEAT.md` | How to add, change or remove a monitored service |
 | `manifests/storageclass.yaml` | `managed-csi-premium-retain` |
 | `manifests/es-api/ilm-beats-30d.json` | ILM policy: daily rollover, delete at 30 days |
